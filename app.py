@@ -1026,11 +1026,8 @@ class PortionDownloaderApp(tk.Tk):
             return
 
         path = Path(entry["path"])
-        folder = path.parent
-        if not folder.exists():
+        if not self.reveal_path(path):
             messagebox.showwarning("Missing Folder", "That recent file's folder no longer exists.")
-            return
-        os.startfile(str(folder))  # type: ignore[attr-defined]
 
     def copy_history_path(self) -> None:
         entry = self.selected_history_entry()
@@ -1609,8 +1606,27 @@ class PortionDownloaderApp(tk.Tk):
 
     def open_folder(self) -> None:
         if self.output_path:
-            folder = self.output_path.parent if self.output_path.exists() else Path(self.final_path_var.get()).parent
+            path = self.output_path
+        else:
+            final_path = self.final_path_var.get().strip()
+            if not final_path:
+                return
+            path = Path(final_path)
+
+        if not self.reveal_path(path):
+            messagebox.showwarning("Missing Folder", "The output folder no longer exists.")
+
+    def reveal_path(self, path: Path) -> bool:
+        if path.exists() and path.is_file() and os.name == "nt":
+            subprocess.Popen(["explorer", f"/select,{path}"])
+            return True
+
+        folder = path if path.exists() and path.is_dir() else path.parent
+        if folder.exists():
             os.startfile(str(folder))  # type: ignore[attr-defined]
+            return True
+
+        return False
 
 
 if __name__ == "__main__":
