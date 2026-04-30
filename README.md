@@ -4,13 +4,15 @@ Simple Windows desktop app for downloading only a selected portion of a YouTube 
 
 ## What it does
 
-- accepts a YouTube URL
+- accepts YouTube, Instagram, TikTok, and other `yt-dlp` supported video URLs
 - provides a modern card-based desktop UI with a quick paste button
 - fetches available video and audio formats
 - lets you choose video resolution and audio format, including `Best` options
 - clips only the selected start/end section
 - shows live clip length feedback while you edit timestamps
+- includes a preview timeline cursor for setting start/end times after formats are loaded
 - includes quick range buttons for 15, 30, 60 seconds, or the full loaded video
+- falls back to a local-source workflow for TikTok links that block direct ffmpeg streaming
 - outputs an `.mp4` file and converts when a direct MP4 copy is not possible
 - lets you choose and remember an output folder
 - suggests a Windows-safe filename based on the video title and selected time range

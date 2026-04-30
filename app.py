@@ -4,11 +4,14 @@ import queue
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import tkinter as tk
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 try:
     import yt_dlp
@@ -29,6 +32,49 @@ ACCENT = "#0f766e"
 ACCENT_DARK = "#0b5f59"
 BORDER = "#ded6c8"
 SOFT_ACCENT = "#e3f4ef"
+
+
+def format_has_video(fmt: dict | None) -> bool:
+    return bool(fmt and fmt.get("vcodec") not in {None, "none"})
+
+
+def format_has_audio(fmt: dict | None) -> bool:
+    return bool(fmt and fmt.get("acodec") not in {None, "none"})
+
+
+def same_media_resource(video_format: dict, audio_format: dict | None) -> bool:
+    if not audio_format:
+        return False
+    if video_format.get("format_id") and video_format.get("format_id") == audio_format.get("format_id"):
+        return True
+    return bool(video_format.get("url") and video_format.get("url") == audio_format.get("url"))
+
+
+def source_host(url: str) -> str:
+    try:
+        return urlparse(url).netloc.lower()
+    except ValueError:
+        return ""
+
+
+def prefers_local_download(url: str) -> bool:
+    host = source_host(url)
+    return "tiktok.com" in host
+
+
+def supports_timestamp_url(url: str) -> bool:
+    host = source_host(url)
+    return "youtube.com" in host or "youtu.be" in host
+
+
+def with_timestamp(url: str, seconds: float) -> str:
+    if not supports_timestamp_url(url):
+        return url
+
+    parsed = urlparse(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query["t"] = f"{max(0, int(seconds))}s"
+    return urlunparse(parsed._replace(query=urlencode(query)))
 
 
 def get_settings_path() -> Path:
@@ -241,6 +287,30 @@ def ydl_options() -> dict:
     }
 
 
+def build_ydl_format_selector(video_format: dict, audio_format: dict | None) -> str:
+    video_id = str(video_format.get("format_id") or "best")
+    if not audio_format:
+        return video_id
+
+    audio_id = str(audio_format.get("format_id") or "")
+    if not audio_id or same_media_resource(video_format, audio_format) or format_has_video(audio_format):
+        return video_id
+
+    return f"{video_id}+{audio_id}/{video_id}/best"
+
+
+def ydl_download_options(temp_path: Path, video_format: dict, audio_format: dict | None, progress_hook) -> dict:
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "format": build_ydl_format_selector(video_format, audio_format),
+        "outtmpl": str(temp_path / "source.%(ext)s"),
+        "merge_output_format": "mp4",
+        "progress_hooks": [progress_hook],
+    }
+
+
 class PortionDownloaderApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -273,6 +343,8 @@ class PortionDownloaderApp(tk.Tk):
         self.start_var = tk.StringVar(value="00:00:00")
         self.end_var = tk.StringVar()
         self.clip_length_var = tk.StringVar(value="Clip length: set an end time")
+        self.preview_slider_var = tk.DoubleVar(value=0.0)
+        self.preview_time_var = tk.StringVar(value="Cursor: 00:00:00")
         self.filename_var = tk.StringVar()
         self.folder_var = tk.StringVar(value=str(self.initial_output_folder()))
         self.remember_folder_var = tk.BooleanVar(value=bool(self.settings.get("remember_folder")))
@@ -350,7 +422,7 @@ class PortionDownloaderApp(tk.Tk):
 
         body_font = ("Segoe UI", 10)
         small_font = ("Segoe UI", 9)
-        title_font = ("Segoe UI Semibold", 24)
+        title_font = ("Segoe UI Semibold", 19)
         section_font = ("Segoe UI Semibold", 11)
 
         style.configure(".", font=body_font, background=APP_BG, foreground=INK)
@@ -393,12 +465,12 @@ class PortionDownloaderApp(tk.Tk):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
-        root = ttk.Frame(self, style="App.TFrame", padding=22)
+        root = ttk.Frame(self, style="App.TFrame", padding=18)
         root.grid(sticky="nsew")
         root.columnconfigure(0, weight=1)
         root.rowconfigure(1, weight=1)
 
-        hero = ttk.Frame(root, style="Hero.TFrame", padding=(24, 22))
+        hero = ttk.Frame(root, style="Hero.TFrame", padding=(20, 14))
         hero.grid(row=0, column=0, sticky="ew")
         hero.columnconfigure(0, weight=1)
 
@@ -408,19 +480,12 @@ class PortionDownloaderApp(tk.Tk):
         )
         ttk.Label(
             hero,
-            text="Fetch quality options, trim by timestamp, export MP4, and keep your recent clips close.",
+            text="Fetch quality options, trim by timestamp, export MP4, and keep recent clips close.",
             style="HeroSubtitle.TLabel",
-        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
-
-        hero_badges = ttk.Frame(hero, style="Hero.TFrame")
-        hero_badges.grid(row=3, column=0, sticky="w", pady=(18, 0))
-        for index, label in enumerate(("Frame-friendly trims", "Smart filenames", "Recent downloads")):
-            ttk.Label(hero_badges, text=label, style="HeroBadge.TLabel").grid(
-                row=0, column=index, sticky="w", padx=(0 if index == 0 else 10, 0)
-            )
+        ).grid(row=2, column=0, sticky="w", pady=(6, 0))
 
         content = ttk.Frame(root, style="App.TFrame")
-        content.grid(row=1, column=0, sticky="nsew", pady=(18, 0))
+        content.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
         content.columnconfigure(0, weight=3, uniform="content")
         content.columnconfigure(1, weight=2, uniform="content")
         content.rowconfigure(0, weight=1)
@@ -432,7 +497,7 @@ class PortionDownloaderApp(tk.Tk):
         right_column = ttk.Frame(content, style="App.TFrame")
         right_column.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
         right_column.columnconfigure(0, weight=1)
-        right_column.rowconfigure(1, weight=1)
+        right_column.rowconfigure(2, weight=1)
 
         source_card = ttk.Frame(left_column, style="Card.TFrame", padding=18)
         source_card.grid(row=0, column=0, sticky="ew")
@@ -441,7 +506,7 @@ class PortionDownloaderApp(tk.Tk):
         ttk.Label(source_card, text="1. Add Source", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             source_card,
-            text="Paste a YouTube link, then fetch the available streams before trimming.",
+            text="Paste a YouTube, Instagram, or TikTok link, then fetch streams before trimming.",
             style="Muted.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(4, 12))
 
@@ -476,7 +541,7 @@ class PortionDownloaderApp(tk.Tk):
         formats_card.grid(row=1, column=0, sticky="ew", pady=(18, 0))
         formats_card.columnconfigure(1, weight=1)
 
-        ttk.Label(formats_card, text="2. Choose Quality", style="Section.TLabel").grid(
+        ttk.Label(formats_card, text="3. Choose Quality", style="Section.TLabel").grid(
             row=0, column=0, columnspan=2, sticky="w"
         )
         ttk.Label(formats_card, textvariable=self.quality_hint_var, style="Muted.TLabel").grid(
@@ -505,20 +570,20 @@ class PortionDownloaderApp(tk.Tk):
         self.audio_combo.grid(row=3, column=1, sticky="ew", pady=(12, 0))
         self.audio_combo.set("Fetch formats first")
 
-        range_card = ttk.Frame(left_column, style="Card.TFrame", padding=18)
-        range_card.grid(row=2, column=0, sticky="ew", pady=(18, 0))
+        range_card = ttk.Frame(right_column, style="Card.TFrame", padding=18)
+        range_card.grid(row=0, column=0, sticky="ew")
         range_card.columnconfigure(0, weight=1)
 
         range_header = ttk.Frame(range_card, style="Card.TFrame")
         range_header.grid(row=0, column=0, sticky="ew")
         range_header.columnconfigure(0, weight=1)
-        ttk.Label(range_header, text="3. Set Clip Range", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(range_header, text="2. Set Clip Range", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(range_header, textvariable=self.clip_length_var, style="Pill.TLabel").grid(
             row=0, column=1, sticky="e"
         )
         ttk.Label(
             range_card,
-            text="Use SS, MM:SS, or HH:MM:SS(.ms). Quick buttons build a clean end time from your start.",
+            text="Use the fields, quick buttons, or preview cursor to choose the exact portion.",
             style="Muted.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(4, 12))
 
@@ -531,8 +596,50 @@ class PortionDownloaderApp(tk.Tk):
         ttk.Label(time_grid, text="End", style="Card.TLabel").grid(row=0, column=2, sticky="w", padx=(14, 10))
         ttk.Entry(time_grid, textvariable=self.end_var).grid(row=0, column=3, sticky="ew")
 
+        self.preview_scale = ttk.Scale(
+            range_card,
+            from_=0,
+            to=0,
+            orient="horizontal",
+            variable=self.preview_slider_var,
+            command=self.on_preview_slider_changed,
+        )
+        self.preview_scale.grid(row=3, column=0, sticky="ew", pady=(14, 0))
+        self.preview_scale.configure(state="disabled")
+
+        preview_row = ttk.Frame(range_card, style="Card.TFrame")
+        preview_row.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+        preview_row.columnconfigure(0, weight=1)
+        ttk.Label(preview_row, textvariable=self.preview_time_var, style="Muted.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        self.set_start_button = ttk.Button(
+            preview_row,
+            text="Set Start",
+            style="Ghost.TButton",
+            command=self.set_start_from_preview,
+            state="disabled",
+        )
+        self.set_start_button.grid(row=0, column=1, sticky="e", padx=(8, 0))
+        self.set_end_button = ttk.Button(
+            preview_row,
+            text="Set End",
+            style="Ghost.TButton",
+            command=self.set_end_from_preview,
+            state="disabled",
+        )
+        self.set_end_button.grid(row=0, column=2, sticky="e", padx=(8, 0))
+        self.open_preview_button = ttk.Button(
+            preview_row,
+            text="Open At Cursor",
+            style="Ghost.TButton",
+            command=self.open_source_at_preview,
+            state="disabled",
+        )
+        self.open_preview_button.grid(row=0, column=3, sticky="e", padx=(8, 0))
+
         quick_row = ttk.Frame(range_card, style="Card.TFrame")
-        quick_row.grid(row=3, column=0, sticky="w", pady=(14, 0))
+        quick_row.grid(row=5, column=0, sticky="w", pady=(14, 0))
         ttk.Button(quick_row, text="+15 sec", style="Ghost.TButton", command=lambda: self.apply_duration_preset(15)).grid(
             row=0, column=0, sticky="w"
         )
@@ -547,7 +654,7 @@ class PortionDownloaderApp(tk.Tk):
         )
 
         output_card = ttk.Frame(right_column, style="Card.TFrame", padding=18)
-        output_card.grid(row=0, column=0, sticky="ew")
+        output_card.grid(row=1, column=0, sticky="ew", pady=(18, 0))
         output_card.columnconfigure(0, weight=1)
 
         ttk.Label(output_card, text="4. Save Clip", style="Section.TLabel").grid(row=0, column=0, sticky="w")
@@ -579,7 +686,7 @@ class PortionDownloaderApp(tk.Tk):
         self.download_button.grid(row=7, column=0, sticky="ew", pady=(18, 0))
 
         history_card = ttk.Frame(right_column, style="Card.TFrame", padding=18)
-        history_card.grid(row=1, column=0, sticky="nsew", pady=(18, 0))
+        history_card.grid(row=2, column=0, sticky="nsew", pady=(18, 0))
         history_card.columnconfigure(0, weight=1)
         history_card.rowconfigure(2, weight=1)
 
@@ -783,6 +890,62 @@ class PortionDownloaderApp(tk.Tk):
         self.end_var.set(format_seconds_for_display(float(duration)))
         self.status_var.set("Range set to the full loaded video.")
 
+    def on_preview_slider_changed(self, value: str) -> None:
+        try:
+            seconds = float(value)
+        except ValueError:
+            seconds = 0.0
+        self.preview_time_var.set(f"Cursor: {format_seconds_for_display(seconds)}")
+
+    def set_preview_controls_enabled(self, enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
+        self.preview_scale.configure(state=state)
+        self.set_start_button.configure(state=state)
+        self.set_end_button.configure(state=state)
+        self.open_preview_button.configure(state=state)
+
+    def reset_preview_selector(self) -> None:
+        self.preview_scale.configure(to=0)
+        self.preview_slider_var.set(0.0)
+        self.preview_time_var.set("Cursor: 00:00:00")
+        self.set_preview_controls_enabled(False)
+
+    def configure_preview_selector(self, duration: float | None) -> None:
+        if not duration or duration <= 0:
+            self.reset_preview_selector()
+            return
+
+        self.preview_scale.configure(to=float(duration))
+        self.preview_slider_var.set(0.0)
+        self.preview_time_var.set("Cursor: 00:00:00")
+        self.set_preview_controls_enabled(True)
+
+    def preview_seconds(self) -> float:
+        return max(0.0, float(self.preview_slider_var.get()))
+
+    def set_start_from_preview(self) -> None:
+        self.start_var.set(format_seconds_for_display(self.preview_seconds()))
+        self.status_var.set("Start time set from the preview cursor.")
+
+    def set_end_from_preview(self) -> None:
+        self.end_var.set(format_seconds_for_display(self.preview_seconds()))
+        self.status_var.set("End time set from the preview cursor.")
+
+    def source_url(self) -> str:
+        return (self.video_info.get("webpage_url") if self.video_info else "") or self.url_var.get().strip()
+
+    def open_source_at_preview(self) -> None:
+        url = self.source_url()
+        if not url:
+            self.status_var.set("Load a source first.")
+            return
+
+        webbrowser.open(with_timestamp(url, self.preview_seconds()))
+        if supports_timestamp_url(url):
+            self.status_var.set("Opened the source near the preview cursor.")
+        else:
+            self.status_var.set("Opened the source page. This site does not support timestamp links reliably.")
+
     def copy_text_to_clipboard(self, text: str, status: str) -> None:
         self.clipboard_clear()
         self.clipboard_append(text)
@@ -913,6 +1076,7 @@ class PortionDownloaderApp(tk.Tk):
         self.open_file_button.configure(state="disabled")
         self.open_folder_button.configure(state="disabled")
         self.copy_path_button.configure(state="disabled")
+        self.reset_preview_selector()
         self.set_busy(True)
         self.start_indeterminate_progress()
         self.status_var.set("Fetching formats...")
@@ -984,6 +1148,7 @@ class PortionDownloaderApp(tk.Tk):
         duration_text = f" ({format_seconds_for_display(float(duration))})" if duration else ""
         self.duration_var.set(f"Duration: {format_seconds_for_display(float(duration))}" if duration else "Duration: --")
         self.title_var.set(f"{title}{duration_text}")
+        self.configure_preview_selector(float(duration) if duration else None)
         self.quality_hint_var.set(
             f"Loaded {len(video_formats)} video streams and {len(audio_formats)} audio streams. Best picks are selected."
         )
@@ -1118,7 +1283,7 @@ class PortionDownloaderApp(tk.Tk):
         output_path = ensure_unique_path(output_folder / final_name)
         video_option = self.selected_option(self.video_combo, self.video_options)
         audio_option = self.selected_option(self.audio_combo, self.audio_options)
-        source_url = (self.video_info.get("webpage_url") if self.video_info else "") or self.url_var.get().strip()
+        source_url = self.source_url()
 
         if self.remember_folder_var.get():
             self.save_settings()
@@ -1172,61 +1337,164 @@ class PortionDownloaderApp(tk.Tk):
             video_format = self.choose_video_format(video_option, video_formats)
             audio_format = self.choose_audio_format(audio_option, audio_formats)
 
-            self.ui_queue.put(("status", "Starting download and clip..."))
-            command = self.build_ffmpeg_command(
-                ffmpeg_path=ffmpeg_path,
-                video_format=video_format,
-                audio_format=audio_format,
-                start=start,
-                duration=duration,
-                output_path=output_path,
-            )
-
-            creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                creationflags=creationflags,
-            )
-
-            if not process.stdout:
-                raise RuntimeError("Could not read ffmpeg progress output.")
-
-            for line in process.stdout:
-                text = line.strip()
-                if not text or "=" not in text:
-                    continue
-                key, value = text.split("=", 1)
-                if key == "out_time":
-                    try:
-                        current = parse_timestamp(value)
-                    except ValueError:
-                        continue
-                    percent = (current / duration) * 100 if duration > 0 else 0
-                    self.ui_queue.put(("progress", percent))
-                    self.ui_queue.put(
-                        (
-                            "status",
-                            f"Downloading and converting... {min(percent, 100):.1f}%",
-                        )
+            if prefers_local_download(source_url):
+                self.download_source_then_clip(
+                    source_url=source_url,
+                    video_format=video_format,
+                    audio_format=audio_format,
+                    start=start,
+                    duration=duration,
+                    output_path=output_path,
+                    ffmpeg_path=ffmpeg_path,
+                )
+            else:
+                self.ui_queue.put(("status", "Starting direct stream clip..."))
+                command = self.build_ffmpeg_command(
+                    ffmpeg_path=ffmpeg_path,
+                    video_format=video_format,
+                    audio_format=audio_format,
+                    start=start,
+                    duration=duration,
+                    output_path=output_path,
+                )
+                try:
+                    self.run_ffmpeg_with_progress(command, duration, "Downloading and converting")
+                except RuntimeError as exc:
+                    if not self.should_retry_with_local_source(exc, source_url):
+                        raise
+                    self.ui_queue.put(("status", "Direct stream was blocked. Downloading source first..."))
+                    self.download_source_then_clip(
+                        source_url=source_url,
+                        video_format=video_format,
+                        audio_format=audio_format,
+                        start=start,
+                        duration=duration,
+                        output_path=output_path,
+                        ffmpeg_path=ffmpeg_path,
                     )
-                elif key == "progress" and value == "end":
-                    self.ui_queue.put(("progress", 100))
-
-            return_code = process.wait()
-            stderr_text = process.stderr.read().strip() if process.stderr else ""
-
-            if return_code != 0:
-                detail = stderr_text or "ffmpeg exited with a non-zero status."
-                raise RuntimeError(detail)
 
             self.ui_queue.put(("done", str(output_path)))
         except Exception as exc:
             self.ui_queue.put(("error", f"Download failed: {exc}"))
+
+    def should_retry_with_local_source(self, exc: RuntimeError, source_url: str) -> bool:
+        message = str(exc).lower()
+        blocked = "403" in message or "forbidden" in message or "access denied" in message
+        return blocked or prefers_local_download(source_url)
+
+    def run_ffmpeg_with_progress(
+        self,
+        command: list[str],
+        duration: float,
+        status_label: str,
+        progress_start: float = 0.0,
+        progress_span: float = 100.0,
+    ) -> None:
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creationflags,
+        )
+
+        if not process.stdout:
+            raise RuntimeError("Could not read ffmpeg progress output.")
+
+        for line in process.stdout:
+            text = line.strip()
+            if not text or "=" not in text:
+                continue
+            key, value = text.split("=", 1)
+            if key == "out_time":
+                try:
+                    current = parse_timestamp(value)
+                except ValueError:
+                    continue
+                percent = (current / duration) * 100 if duration > 0 else 0
+                percent = min(percent, 100)
+                overall = progress_start + (percent * progress_span / 100)
+                self.ui_queue.put(("progress", overall))
+                self.ui_queue.put(("status", f"{status_label}... {percent:.1f}%"))
+            elif key == "progress" and value == "end":
+                self.ui_queue.put(("progress", progress_start + progress_span))
+
+        return_code = process.wait()
+        stderr_text = process.stderr.read().strip() if process.stderr else ""
+        if return_code != 0:
+            detail = stderr_text or "ffmpeg exited with a non-zero status."
+            raise RuntimeError(detail)
+
+    def download_source_then_clip(
+        self,
+        source_url: str,
+        video_format: dict,
+        audio_format: dict | None,
+        start: float,
+        duration: float,
+        output_path: Path,
+        ffmpeg_path: str,
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="portion_downloader_") as temp_dir:
+            temp_path = Path(temp_dir)
+            self.ui_queue.put(("status", "Downloading protected source with yt-dlp..."))
+            download_opts = ydl_download_options(
+                temp_path=temp_path,
+                video_format=video_format,
+                audio_format=audio_format,
+                progress_hook=self.ytdlp_progress_hook,
+            )
+            with yt_dlp.YoutubeDL(download_opts) as ydl:
+                downloaded_info = ydl.extract_info(source_url, download=True)
+
+            source_file = self.find_downloaded_media(temp_path, downloaded_info)
+            self.ui_queue.put(("status", "Trimming downloaded source..."))
+            command = self.build_local_clip_command(
+                ffmpeg_path=ffmpeg_path,
+                source_file=source_file,
+                include_audio=audio_format is not None,
+                start=start,
+                duration=duration,
+                output_path=output_path,
+            )
+            self.run_ffmpeg_with_progress(command, duration, "Trimming local source", 65, 35)
+
+    def ytdlp_progress_hook(self, data: dict) -> None:
+        status = data.get("status")
+        if status == "downloading":
+            total = data.get("total_bytes") or data.get("total_bytes_estimate")
+            downloaded = data.get("downloaded_bytes") or 0
+            if total:
+                percent = min((downloaded / total) * 100, 100)
+                self.ui_queue.put(("progress", percent * 0.65))
+                self.ui_queue.put(("status", f"Downloading protected source... {percent:.1f}%"))
+            else:
+                self.ui_queue.put(("status", "Downloading protected source..."))
+        elif status == "finished":
+            self.ui_queue.put(("progress", 65))
+            self.ui_queue.put(("status", "Source downloaded. Preparing trim..."))
+
+    def find_downloaded_media(self, temp_path: Path, downloaded_info: dict) -> Path:
+        for download in downloaded_info.get("requested_downloads") or []:
+            filepath = download.get("filepath")
+            if filepath and Path(filepath).exists():
+                return Path(filepath)
+
+        filename = downloaded_info.get("_filename")
+        if filename and Path(filename).exists():
+            return Path(filename)
+
+        media_files = [
+            path
+            for path in temp_path.iterdir()
+            if path.is_file() and path.suffix.lower() not in {".part", ".ytdl", ".json"}
+        ]
+        if not media_files:
+            raise RuntimeError("yt-dlp finished but no downloaded media file was found.")
+        return max(media_files, key=lambda path: path.stat().st_size)
 
     def build_ffmpeg_command(
         self,
@@ -1240,12 +1508,15 @@ class PortionDownloaderApp(tk.Tk):
         command = [ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error"]
         command.extend(self.ffmpeg_input_args(video_format, start, duration))
 
-        if audio_format:
+        single_input_audio = bool(
+            audio_format and (same_media_resource(video_format, audio_format) or format_has_video(audio_format))
+        )
+        if audio_format and not single_input_audio:
             command.extend(self.ffmpeg_input_args(audio_format, start, duration))
 
         command.extend(["-map", "0:v:0"])
         if audio_format:
-            command.extend(["-map", "1:a:0"])
+            command.extend(["-map", "0:a:0?" if single_input_audio else "1:a:0"])
         else:
             command.append("-an")
 
@@ -1265,6 +1536,42 @@ class PortionDownloaderApp(tk.Tk):
         command.extend(["-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(output_path)])
         return command
 
+    def build_local_clip_command(
+        self,
+        ffmpeg_path: str,
+        source_file: Path,
+        include_audio: bool,
+        start: float,
+        duration: float,
+        output_path: Path,
+    ) -> list[str]:
+        command = [
+            ffmpeg_path,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            ffmpeg_time(start),
+            "-t",
+            ffmpeg_time(duration),
+            "-i",
+            str(source_file),
+            "-map",
+            "0:v:0",
+        ]
+        if include_audio:
+            command.extend(["-map", "0:a:0?"])
+        else:
+            command.append("-an")
+
+        command.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
+        if include_audio:
+            command.extend(["-c:a", "aac", "-b:a", "192k"])
+
+        command.extend(["-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(output_path)])
+        return command
+
     def ffmpeg_input_args(self, fmt: dict, start: float, duration: float) -> list[str]:
         url = fmt.get("url") or fmt.get("manifest_url")
         if not url:
@@ -1272,7 +1579,9 @@ class PortionDownloaderApp(tk.Tk):
 
         args = ["-ss", ffmpeg_time(start), "-t", ffmpeg_time(duration)]
         headers = fmt.get("http_headers") or (self.video_info.get("http_headers") if self.video_info else {})
-        user_agent = headers.get("User-Agent") if headers else ""
+        user_agent = ""
+        if headers:
+            user_agent = next((value for key, value in headers.items() if key.lower() == "user-agent"), "")
         headers_blob = build_headers_blob(headers)
 
         if user_agent:
