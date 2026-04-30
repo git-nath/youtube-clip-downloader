@@ -12,6 +12,7 @@ Simple Windows desktop app for downloading only a selected portion of a YouTube 
 - shows live clip length feedback while you edit timestamps
 - includes a preview timeline cursor for setting start/end times after formats are loaded
 - includes quick range buttons for 15, 30, 60 seconds, or the full loaded video
+- can split the selected range into numbered clips, such as 30 minutes into 2-minute parts
 - falls back to a local-source workflow for TikTok links that block direct ffmpeg streaming
 - outputs an `.mp4` file and converts when a direct MP4 copy is not possible
 - lets you choose and remember an output folder

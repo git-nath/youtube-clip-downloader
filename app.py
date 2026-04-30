@@ -22,6 +22,7 @@ except ImportError:
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1F]')
 DEFAULT_WINDOW_SIZE = "1040x780"
 HISTORY_LIMIT = 6
+MAX_SPLIT_PARTS = 100
 
 APP_BG = "#f5f1e8"
 CARD_BG = "#fffaf0"
@@ -329,6 +330,7 @@ class PortionDownloaderApp(tk.Tk):
         self.video_options: list[dict] = []
         self.audio_options: list[dict] = []
         self.output_path: Path | None = None
+        self.output_paths: list[Path] = []
 
         self.auto_filename = True
         self._updating_filename = False
@@ -345,6 +347,9 @@ class PortionDownloaderApp(tk.Tk):
         self.clip_length_var = tk.StringVar(value="Clip length: set an end time")
         self.preview_slider_var = tk.DoubleVar(value=0.0)
         self.preview_time_var = tk.StringVar(value="Cursor: 00:00:00")
+        self.split_enabled_var = tk.BooleanVar(value=False)
+        self.split_length_var = tk.StringVar(value="00:02:00")
+        self.split_summary_var = tk.StringVar(value="Split is off. Download creates one file.")
         self.filename_var = tk.StringVar()
         self.folder_var = tk.StringVar(value=str(self.initial_output_folder()))
         self.remember_folder_var = tk.BooleanVar(value=bool(self.settings.get("remember_folder")))
@@ -357,10 +362,13 @@ class PortionDownloaderApp(tk.Tk):
         self.filename_var.trace_add("write", self.on_filename_changed)
         self.start_var.trace_add("write", self.on_time_changed)
         self.end_var.trace_add("write", self.on_time_changed)
+        self.split_enabled_var.trace_add("write", self.on_split_changed)
+        self.split_length_var.trace_add("write", self.on_split_changed)
         self.folder_var.trace_add("write", self.on_folder_changed)
         self.remember_folder_var.trace_add("write", self.on_folder_preference_changed)
 
         self.update_clip_length()
+        self.update_split_summary()
         self.set_busy(False)
         self.set_dependency_status()
         self.after(150, self.process_queue)
@@ -512,6 +520,7 @@ class PortionDownloaderApp(tk.Tk):
         left_column = ttk.Frame(content, style="App.TFrame")
         left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
         left_column.columnconfigure(0, weight=1)
+        left_column.rowconfigure(2, weight=1)
 
         right_column = ttk.Frame(content, style="App.TFrame")
         right_column.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
@@ -588,6 +597,63 @@ class PortionDownloaderApp(tk.Tk):
         )
         self.audio_combo.grid(row=3, column=1, sticky="ew", pady=(12, 0))
         self.audio_combo.set("Fetch formats first")
+
+        split_card = ttk.Frame(left_column, style="Card.TFrame", padding=18)
+        split_card.grid(row=2, column=0, sticky="nsew", pady=(18, 0))
+        split_card.columnconfigure(0, weight=1)
+
+        ttk.Label(split_card, text="Optional: Split Range", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            split_card,
+            text="Break the selected Start to End range into smaller numbered MP4 files.",
+            style="Muted.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(4, 12))
+
+        self.split_enabled_check = ttk.Checkbutton(
+            split_card,
+            text="Split into multiple parts",
+            variable=self.split_enabled_var,
+        )
+        self.split_enabled_check.grid(row=2, column=0, sticky="w")
+
+        split_length_row = ttk.Frame(split_card, style="Card.TFrame")
+        split_length_row.grid(row=3, column=0, sticky="ew", pady=(14, 0))
+        split_length_row.columnconfigure(1, weight=1)
+        ttk.Label(split_length_row, text="Each part", style="Card.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.split_length_entry = ttk.Entry(split_length_row, textvariable=self.split_length_var, width=14)
+        self.split_length_entry.grid(row=0, column=1, sticky="ew")
+
+        split_quick_row = ttk.Frame(split_card, style="Card.TFrame")
+        split_quick_row.grid(row=4, column=0, sticky="w", pady=(12, 0))
+        self.split_two_button = ttk.Button(
+            split_quick_row,
+            text="2 min",
+            style="Ghost.TButton",
+            command=lambda: self.set_split_length("00:02:00"),
+        )
+        self.split_two_button.grid(row=0, column=0, sticky="w")
+        self.split_three_button = ttk.Button(
+            split_quick_row,
+            text="3 min",
+            style="Ghost.TButton",
+            command=lambda: self.set_split_length("00:03:00"),
+        )
+        self.split_three_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self.split_five_button = ttk.Button(
+            split_quick_row,
+            text="5 min",
+            style="Ghost.TButton",
+            command=lambda: self.set_split_length("00:05:00"),
+        )
+        self.split_five_button.grid(row=0, column=2, sticky="w", padx=(8, 0))
+
+        ttk.Label(
+            split_card,
+            textvariable=self.split_summary_var,
+            style="Muted.TLabel",
+            wraplength=680,
+            justify="left",
+        ).grid(row=5, column=0, sticky="ew", pady=(14, 0))
 
         range_card = ttk.Frame(right_column, style="Card.TFrame", padding=18)
         range_card.grid(row=0, column=0, sticky="ew")
@@ -847,8 +913,13 @@ class PortionDownloaderApp(tk.Tk):
 
     def on_time_changed(self, *_args) -> None:
         self.update_clip_length()
+        self.update_split_summary()
         if self.auto_filename and self.video_info:
             self.set_auto_filename()
+
+    def on_split_changed(self, *_args) -> None:
+        self.update_split_summary()
+        self.update_split_controls()
 
     def on_folder_preference_changed(self, *_args) -> None:
         self.save_settings()
@@ -874,6 +945,62 @@ class PortionDownloaderApp(tk.Tk):
             return
 
         self.clip_length_var.set(f"Clip length: {format_seconds_for_display(end - start)}")
+
+    def set_split_length(self, value: str) -> None:
+        self.split_enabled_var.set(True)
+        self.split_length_var.set(value)
+        self.status_var.set(f"Split length set to {value}.")
+
+    def update_split_controls(self) -> None:
+        if not hasattr(self, "split_length_entry"):
+            return
+
+        enabled = bool(self.split_enabled_var.get()) and not self._busy
+        control_state = "normal" if enabled else "disabled"
+        check_state = "disabled" if self._busy else "normal"
+        self.split_enabled_check.configure(state=check_state)
+        self.split_length_entry.configure(state=control_state)
+        self.split_two_button.configure(state=control_state)
+        self.split_three_button.configure(state=control_state)
+        self.split_five_button.configure(state=control_state)
+
+        if hasattr(self, "download_button"):
+            label = "Download Split Clips" if self.split_enabled_var.get() else "Download Section"
+            self.download_button.configure(text=label)
+
+    def update_split_summary(self) -> None:
+        if not self.split_enabled_var.get():
+            self.split_summary_var.set("Split is off. Download creates one file.")
+            return
+
+        try:
+            start = parse_timestamp(self.start_var.get())
+            end = parse_timestamp(self.end_var.get())
+            split_length = parse_timestamp(self.split_length_var.get())
+        except ValueError:
+            self.split_summary_var.set("Enter a valid range and part length, like 00:02:00 or 3:00.")
+            return
+
+        if end <= start:
+            self.split_summary_var.set("End time must be after start time before splitting.")
+            return
+        if split_length <= 0:
+            self.split_summary_var.set("Part length must be greater than zero.")
+            return
+
+        total = end - start
+        count = int((total + split_length - 0.001) // split_length)
+        last_duration = total - (split_length * (count - 1)) if count else 0
+        if count > MAX_SPLIT_PARTS:
+            self.split_summary_var.set(
+                f"This would create {count} files. Increase part length to stay under {MAX_SPLIT_PARTS} parts."
+            )
+            return
+
+        self.split_summary_var.set(
+            f"Ready to create {count} files. Each part is {format_seconds_for_display(split_length)}"
+            f"; last part is {format_seconds_for_display(last_duration)}."
+        )
 
     def paste_url(self) -> None:
         try:
@@ -980,9 +1107,13 @@ class PortionDownloaderApp(tk.Tk):
         self.status_var.set(status)
 
     def copy_final_path(self) -> None:
-        path = self.final_path_var.get().strip()
-        if path:
-            self.copy_text_to_clipboard(path, "Final file path copied.")
+        if self.output_path:
+            self.copy_text_to_clipboard(str(self.output_path), "Final file path copied.")
+            return
+
+        path_text = self.final_path_var.get().strip()
+        if path_text:
+            self.copy_text_to_clipboard(path_text, "Final file path copied.")
 
     def refresh_history(self, select_first: bool = False) -> None:
         for item in self.history_tree.get_children():
@@ -1028,24 +1159,36 @@ class PortionDownloaderApp(tk.Tk):
             return None
         return self.download_history[index]
 
-    def add_to_history(self, path: Path) -> None:
-        try:
-            start = parse_timestamp(self.start_var.get())
-            end = parse_timestamp(self.end_var.get())
-            range_text = f"{format_seconds_for_display(start)} to {format_seconds_for_display(end)}"
-        except ValueError:
-            range_text = "clip"
+    def make_history_entry(self, path: Path, range_text: str | None = None) -> dict:
+        if range_text is None:
+            try:
+                start = parse_timestamp(self.start_var.get())
+                end = parse_timestamp(self.end_var.get())
+                range_text = f"{format_seconds_for_display(start)} to {format_seconds_for_display(end)}"
+            except ValueError:
+                range_text = "clip"
 
-        path_text = str(path)
-        entry = {
-            "path": path_text,
+        return {
+            "path": str(path),
             "name": path.name,
             "range": range_text,
             "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
+
+    def add_history_entry(self, entry: dict) -> None:
+        path_text = str(entry.get("path") or "")
         self.download_history = [item for item in self.download_history if item.get("path") != path_text]
         self.download_history.insert(0, entry)
         self.download_history = self.download_history[:HISTORY_LIMIT]
+
+    def add_to_history(self, path: Path, range_text: str | None = None) -> None:
+        self.add_history_entry(self.make_history_entry(path, range_text))
+        self.save_settings()
+        self.refresh_history(select_first=True)
+
+    def add_jobs_to_history(self, clip_jobs: list[dict]) -> None:
+        for job in reversed(clip_jobs):
+            self.add_history_entry(self.make_history_entry(job["path"], self.job_range_text(job)))
         self.save_settings()
         self.refresh_history(select_first=True)
 
@@ -1109,6 +1252,7 @@ class PortionDownloaderApp(tk.Tk):
             return
 
         self.output_path = None
+        self.output_paths = []
         self.final_path_var.set("")
         self.open_file_button.configure(state="disabled")
         self.open_folder_button.configure(state="disabled")
@@ -1165,8 +1309,8 @@ class PortionDownloaderApp(tk.Tk):
                     self.status_var.set(message)
                     messagebox.showerror("Error", message)
                 elif kind == "done":
-                    _, path = item
-                    self.on_download_finished(Path(path))
+                    _, clip_jobs = item
+                    self.on_download_finished(clip_jobs)
         except queue.Empty:
             pass
 
@@ -1224,6 +1368,7 @@ class PortionDownloaderApp(tk.Tk):
         self.download_button.configure(state=download_state)
         self.video_combo.configure(state="disabled" if busy or not self.video_options else "readonly")
         self.audio_combo.configure(state="disabled" if busy or not self.audio_options else "readonly")
+        self.update_split_controls()
 
     def finish_busy(self) -> None:
         self.stop_indeterminate_progress()
@@ -1287,6 +1432,48 @@ class PortionDownloaderApp(tk.Tk):
                 return fmt
         raise RuntimeError("Selected audio format is no longer available.")
 
+    def build_clip_jobs(self, start: float, end: float, output_folder: Path, raw_name: str) -> list[dict]:
+        base_name = sanitize_filename(raw_name)
+        if not self.split_enabled_var.get():
+            output_path = ensure_unique_path(output_folder / f"{base_name}.mp4")
+            return [{"index": 1, "start": start, "end": end, "path": output_path}]
+
+        split_length = parse_timestamp(self.split_length_var.get())
+        if split_length <= 0:
+            raise ValueError("Split part length must be greater than zero.")
+
+        jobs = []
+        current = start
+        index = 1
+        while current < end:
+            if index > MAX_SPLIT_PARTS:
+                raise ValueError(
+                    f"That split would create more than {MAX_SPLIT_PARTS} files. Increase the part length."
+                )
+            part_end = min(current + split_length, end)
+            part_name = (
+                f"{base_name} - part {index:03d} "
+                f"[{format_seconds_for_filename(current)} to {format_seconds_for_filename(part_end)}].mp4"
+            )
+            jobs.append(
+                {
+                    "index": index,
+                    "start": current,
+                    "end": part_end,
+                    "path": ensure_unique_path(output_folder / part_name),
+                }
+            )
+            current = part_end
+            index += 1
+
+        if not jobs:
+            raise ValueError("No split parts were created. Check the selected range.")
+
+        return jobs
+
+    def job_range_text(self, job: dict) -> str:
+        return f"{format_seconds_for_display(job['start'])} to {format_seconds_for_display(job['end'])}"
+
     def start_download(self) -> None:
         if self._busy:
             return
@@ -1316,8 +1503,12 @@ class PortionDownloaderApp(tk.Tk):
             self.filename_var.set(raw_name)
             self._updating_filename = False
 
-        final_name = sanitize_filename(raw_name) + ".mp4"
-        output_path = ensure_unique_path(output_folder / final_name)
+        try:
+            clip_jobs = self.build_clip_jobs(start, end, output_folder, raw_name)
+        except ValueError as exc:
+            messagebox.showerror("Invalid Split Settings", str(exc))
+            return
+
         video_option = self.selected_option(self.video_combo, self.video_options)
         audio_option = self.selected_option(self.audio_combo, self.audio_options)
         source_url = self.source_url()
@@ -1326,28 +1517,30 @@ class PortionDownloaderApp(tk.Tk):
             self.save_settings()
 
         self.output_path = None
+        self.output_paths = []
         self.final_path_var.set("")
         self.open_file_button.configure(state="disabled")
         self.open_folder_button.configure(state="disabled")
         self.copy_path_button.configure(state="disabled")
         self.set_busy(True)
         self.progress_bar["value"] = 0
-        self.status_var.set("Preparing selected section...")
+        if len(clip_jobs) > 1:
+            self.status_var.set(f"Preparing {len(clip_jobs)} split clips...")
+        else:
+            self.status_var.set("Preparing selected section...")
 
         worker = threading.Thread(
             target=self._download_worker,
-            args=(start, end, video_option, audio_option, output_path, source_url),
+            args=(clip_jobs, video_option, audio_option, source_url),
             daemon=True,
         )
         worker.start()
 
     def _download_worker(
         self,
-        start: float,
-        end: float,
+        clip_jobs: list[dict],
         video_option: dict,
         audio_option: dict,
-        output_path: Path,
         source_url: str,
     ) -> None:
         ffmpeg_path = shutil.which("ffmpeg")
@@ -1356,7 +1549,6 @@ class PortionDownloaderApp(tk.Tk):
             return
 
         try:
-            duration = end - start
             if yt_dlp is None:
                 raise RuntimeError("yt-dlp is not installed. Run: python -m pip install -r requirements.txt")
 
@@ -1379,23 +1571,13 @@ class PortionDownloaderApp(tk.Tk):
                     source_url=source_url,
                     video_format=video_format,
                     audio_format=audio_format,
-                    start=start,
-                    duration=duration,
-                    output_path=output_path,
+                    clip_jobs=clip_jobs,
                     ffmpeg_path=ffmpeg_path,
                 )
             else:
                 self.ui_queue.put(("status", "Starting direct stream clip..."))
-                command = self.build_ffmpeg_command(
-                    ffmpeg_path=ffmpeg_path,
-                    video_format=video_format,
-                    audio_format=audio_format,
-                    start=start,
-                    duration=duration,
-                    output_path=output_path,
-                )
                 try:
-                    self.run_ffmpeg_with_progress(command, duration, "Downloading and converting")
+                    self.clip_jobs_from_stream(ffmpeg_path, video_format, audio_format, clip_jobs)
                 except RuntimeError as exc:
                     if not self.should_retry_with_local_source(exc, source_url):
                         raise
@@ -1404,13 +1586,11 @@ class PortionDownloaderApp(tk.Tk):
                         source_url=source_url,
                         video_format=video_format,
                         audio_format=audio_format,
-                        start=start,
-                        duration=duration,
-                        output_path=output_path,
+                        clip_jobs=clip_jobs,
                         ffmpeg_path=ffmpeg_path,
                     )
 
-            self.ui_queue.put(("done", str(output_path)))
+            self.ui_queue.put(("done", clip_jobs))
         except Exception as exc:
             self.ui_queue.put(("error", f"Download failed: {exc}"))
 
@@ -1465,14 +1645,38 @@ class PortionDownloaderApp(tk.Tk):
             detail = stderr_text or "ffmpeg exited with a non-zero status."
             raise RuntimeError(detail)
 
+    def clip_jobs_from_stream(
+        self,
+        ffmpeg_path: str,
+        video_format: dict,
+        audio_format: dict | None,
+        clip_jobs: list[dict],
+    ) -> None:
+        total_jobs = len(clip_jobs)
+        for job_index, job in enumerate(clip_jobs):
+            duration = job["end"] - job["start"]
+            progress_start = (job_index / total_jobs) * 100
+            progress_span = 100 / total_jobs
+            status = "Downloading and converting"
+            if total_jobs > 1:
+                status = f"Creating part {job_index + 1}/{total_jobs}"
+
+            command = self.build_ffmpeg_command(
+                ffmpeg_path=ffmpeg_path,
+                video_format=video_format,
+                audio_format=audio_format,
+                start=job["start"],
+                duration=duration,
+                output_path=job["path"],
+            )
+            self.run_ffmpeg_with_progress(command, duration, status, progress_start, progress_span)
+
     def download_source_then_clip(
         self,
         source_url: str,
         video_format: dict,
         audio_format: dict | None,
-        start: float,
-        duration: float,
-        output_path: Path,
+        clip_jobs: list[dict],
         ffmpeg_path: str,
     ) -> None:
         with tempfile.TemporaryDirectory(prefix="portion_downloader_") as temp_dir:
@@ -1488,16 +1692,24 @@ class PortionDownloaderApp(tk.Tk):
                 downloaded_info = ydl.extract_info(source_url, download=True)
 
             source_file = self.find_downloaded_media(temp_path, downloaded_info)
-            self.ui_queue.put(("status", "Trimming downloaded source..."))
-            command = self.build_local_clip_command(
-                ffmpeg_path=ffmpeg_path,
-                source_file=source_file,
-                include_audio=audio_format is not None,
-                start=start,
-                duration=duration,
-                output_path=output_path,
-            )
-            self.run_ffmpeg_with_progress(command, duration, "Trimming local source", 65, 35)
+            total_jobs = len(clip_jobs)
+            for job_index, job in enumerate(clip_jobs):
+                duration = job["end"] - job["start"]
+                progress_start = 65 + ((job_index / total_jobs) * 35)
+                progress_span = 35 / total_jobs
+                status = "Trimming local source"
+                if total_jobs > 1:
+                    status = f"Trimming part {job_index + 1}/{total_jobs}"
+
+                command = self.build_local_clip_command(
+                    ffmpeg_path=ffmpeg_path,
+                    source_file=source_file,
+                    include_audio=audio_format is not None,
+                    start=job["start"],
+                    duration=duration,
+                    output_path=job["path"],
+                )
+                self.run_ffmpeg_with_progress(command, duration, status, progress_start, progress_span)
 
     def ytdlp_progress_hook(self, data: dict) -> None:
         status = data.get("status")
@@ -1629,16 +1841,26 @@ class PortionDownloaderApp(tk.Tk):
         args.extend(["-i", url])
         return args
 
-    def on_download_finished(self, path: Path) -> None:
+    def on_download_finished(self, clip_jobs: list[dict]) -> None:
         self.finish_busy()
-        self.output_path = path
-        self.final_path_var.set(str(path))
+        paths = [job["path"] for job in clip_jobs]
+        first_path = paths[0]
+        self.output_path = first_path
+        self.output_paths = paths
+        if len(paths) == 1:
+            self.final_path_var.set(str(first_path))
+        else:
+            self.final_path_var.set(f"{len(paths)} clips saved in {first_path.parent}")
         self.open_file_button.configure(state="normal")
         self.open_folder_button.configure(state="normal")
         self.copy_path_button.configure(state="normal")
         self.progress_bar["value"] = 100
-        self.add_to_history(path)
-        self.status_var.set("Done. Saved clip and added it to Recent Downloads.")
+        if len(clip_jobs) == 1:
+            self.add_to_history(first_path, self.job_range_text(clip_jobs[0]))
+            self.status_var.set("Done. Saved clip and added it to Recent Downloads.")
+        else:
+            self.add_jobs_to_history(clip_jobs)
+            self.status_var.set(f"Done. Saved {len(clip_jobs)} split clips and added the latest parts to Recent Downloads.")
 
     def open_file(self) -> None:
         if self.output_path and self.output_path.exists():
