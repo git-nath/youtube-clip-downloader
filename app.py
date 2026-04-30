@@ -350,6 +350,7 @@ class PortionDownloaderApp(tk.Tk):
         self.remember_folder_var = tk.BooleanVar(value=bool(self.settings.get("remember_folder")))
         self.status_var = tk.StringVar(value="Ready.")
         self.final_path_var = tk.StringVar(value="")
+        self.history_detail_var = tk.StringVar(value="No recent clips yet.")
 
         self.configure_styles()
         self.build_ui()
@@ -451,6 +452,24 @@ class PortionDownloaderApp(tk.Tk):
         style.map("Accent.TButton", background=[("active", ACCENT_DARK), ("disabled", "#9eb8b2")])
         style.configure("Ghost.TButton", background=CARD_BG, foreground=ACCENT_DARK, bordercolor=BORDER, padding=(10, 6))
         style.map("Ghost.TButton", background=[("active", SOFT_ACCENT)])
+        style.configure(
+            "History.Treeview",
+            background="#fffcf6",
+            fieldbackground="#fffcf6",
+            foreground=INK,
+            bordercolor=BORDER,
+            borderwidth=1,
+            rowheight=30,
+            font=("Segoe UI", 9),
+        )
+        style.configure(
+            "History.Treeview.Heading",
+            background="#efe6d8",
+            foreground=INK,
+            font=("Segoe UI Semibold", 9),
+            relief="flat",
+        )
+        style.map("History.Treeview", background=[("selected", ACCENT)], foreground=[("selected", "white")])
 
         style.configure(
             "Modern.Horizontal.TProgressbar",
@@ -691,7 +710,7 @@ class PortionDownloaderApp(tk.Tk):
         history_card.rowconfigure(2, weight=1)
 
         ttk.Label(history_card, text="Recent Downloads", style="Section.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(history_card, text="Reopen or copy paths from the last few finished clips.", style="Muted.TLabel").grid(
+        ttk.Label(history_card, text="Select a clip to open, reveal, or copy its saved path.", style="Muted.TLabel").grid(
             row=1, column=0, sticky="w", pady=(4, 12)
         )
 
@@ -700,29 +719,38 @@ class PortionDownloaderApp(tk.Tk):
         history_body.columnconfigure(0, weight=1)
         history_body.rowconfigure(0, weight=1)
 
-        self.history_listbox = tk.Listbox(
+        self.history_tree = ttk.Treeview(
             history_body,
-            height=7,
-            bg="#fffcf6",
-            fg=INK,
-            selectbackground=ACCENT,
-            selectforeground="white",
-            highlightthickness=1,
-            highlightbackground=BORDER,
-            relief="flat",
-            activestyle="none",
-            font=("Segoe UI", 9),
+            columns=("created", "range", "name"),
+            show="headings",
+            height=6,
+            selectmode="browse",
+            style="History.Treeview",
         )
-        self.history_listbox.grid(row=0, column=0, sticky="nsew")
-        self.history_listbox.bind("<<ListboxSelect>>", lambda _event: self.update_history_buttons())
-        self.history_listbox.bind("<Double-Button-1>", lambda _event: self.open_history_file())
+        self.history_tree.heading("created", text="Saved")
+        self.history_tree.heading("range", text="Range")
+        self.history_tree.heading("name", text="File")
+        self.history_tree.column("created", width=112, minwidth=96, stretch=False, anchor="w")
+        self.history_tree.column("range", width=150, minwidth=130, stretch=False, anchor="w")
+        self.history_tree.column("name", width=260, minwidth=160, stretch=True, anchor="w")
+        self.history_tree.grid(row=0, column=0, sticky="nsew")
+        self.history_tree.bind("<<TreeviewSelect>>", lambda _event: self.update_history_buttons())
+        self.history_tree.bind("<Double-Button-1>", lambda _event: self.open_history_file())
 
-        history_scroll = ttk.Scrollbar(history_body, orient="vertical", command=self.history_listbox.yview)
+        history_scroll = ttk.Scrollbar(history_body, orient="vertical", command=self.history_tree.yview)
         history_scroll.grid(row=0, column=1, sticky="ns")
-        self.history_listbox.configure(yscrollcommand=history_scroll.set)
+        self.history_tree.configure(yscrollcommand=history_scroll.set)
+
+        ttk.Label(
+            history_card,
+            textvariable=self.history_detail_var,
+            style="Muted.TLabel",
+            wraplength=430,
+            justify="left",
+        ).grid(row=3, column=0, sticky="ew", pady=(10, 0))
 
         history_buttons = ttk.Frame(history_card, style="Card.TFrame")
-        history_buttons.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        history_buttons.grid(row=4, column=0, sticky="ew", pady=(12, 0))
         self.open_history_button = ttk.Button(
             history_buttons,
             text="Open",
@@ -733,7 +761,7 @@ class PortionDownloaderApp(tk.Tk):
         self.open_history_button.grid(row=0, column=0, sticky="w")
         self.open_history_folder_button = ttk.Button(
             history_buttons,
-            text="Folder",
+            text="Reveal",
             style="Ghost.TButton",
             command=self.open_history_folder,
             state="disabled",
@@ -956,34 +984,46 @@ class PortionDownloaderApp(tk.Tk):
         if path:
             self.copy_text_to_clipboard(path, "Final file path copied.")
 
-    def history_label(self, entry: dict) -> str:
-        created = entry.get("created") or "recent"
-        range_text = entry.get("range") or "clip"
-        name = entry.get("name") or Path(entry.get("path") or "").name
-        return f"{created}  |  {range_text}  |  {name}"
+    def refresh_history(self, select_first: bool = False) -> None:
+        for item in self.history_tree.get_children():
+            self.history_tree.delete(item)
 
-    def refresh_history(self) -> None:
-        self.history_listbox.delete(0, tk.END)
-        if not self.download_history:
-            self.history_listbox.insert(tk.END, "No downloads yet")
-        else:
-            for entry in self.download_history:
-                self.history_listbox.insert(tk.END, self.history_label(entry))
+        for index, entry in enumerate(self.download_history):
+            created = entry.get("created") or "recent"
+            range_text = entry.get("range") or "clip"
+            name = entry.get("name") or Path(entry.get("path") or "").name
+            self.history_tree.insert("", "end", iid=str(index), values=(created, range_text, name))
+
+        if select_first and self.download_history:
+            self.history_tree.selection_set("0")
+            self.history_tree.focus("0")
+            self.history_tree.see("0")
+
         self.update_history_buttons()
 
     def update_history_buttons(self) -> None:
-        has_selection = self.selected_history_entry() is not None
+        selected = self.selected_history_entry()
+        has_selection = selected is not None
         state = "normal" if has_selection else "disabled"
         self.open_history_button.configure(state=state)
         self.open_history_folder_button.configure(state=state)
         self.copy_history_button.configure(state=state)
         self.clear_history_button.configure(state="normal" if self.download_history else "disabled")
+        if selected:
+            self.history_detail_var.set(f"Path: {selected['path']}")
+        elif self.download_history:
+            self.history_detail_var.set("Select a recent clip to see its saved path.")
+        else:
+            self.history_detail_var.set("No recent clips yet.")
 
     def selected_history_entry(self) -> dict | None:
-        selection = self.history_listbox.curselection()
+        selection = self.history_tree.selection()
         if not selection:
             return None
-        index = selection[0]
+        try:
+            index = int(selection[0])
+        except ValueError:
+            return None
         if index >= len(self.download_history):
             return None
         return self.download_history[index]
@@ -1007,7 +1047,7 @@ class PortionDownloaderApp(tk.Tk):
         self.download_history.insert(0, entry)
         self.download_history = self.download_history[:HISTORY_LIMIT]
         self.save_settings()
-        self.refresh_history()
+        self.refresh_history(select_first=True)
 
     def open_history_file(self) -> None:
         entry = self.selected_history_entry()
