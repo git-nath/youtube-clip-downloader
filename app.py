@@ -1618,12 +1618,12 @@ class PortionDownloaderApp(tk.Tk):
 
     def reveal_path(self, path: Path) -> bool:
         if path.exists() and path.is_file() and os.name == "nt":
-            subprocess.Popen(["explorer", f"/select,{path}"])
+            subprocess.Popen(["explorer.exe", "/select,", str(path.resolve())])
             return True
 
         folder = path if path.exists() and path.is_dir() else path.parent
         if folder.exists():
-            os.startfile(str(folder))  # type: ignore[attr-defined]
+            os.startfile(str(folder.resolve()))  # type: ignore[attr-defined]
             return True
 
         return False
