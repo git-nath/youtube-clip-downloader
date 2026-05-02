@@ -762,13 +762,26 @@ class PortionDownloaderApp(tk.Tk):
         ttk.Checkbutton(output_card, text="Remember this folder", variable=self.remember_folder_var).grid(
             row=6, column=0, sticky="w", pady=(12, 0)
         )
+        action_row = ttk.Frame(output_card, style="Card.TFrame")
+        action_row.grid(row=7, column=0, sticky="ew", pady=(18, 0))
+        action_row.columnconfigure(0, weight=1)
+        action_row.columnconfigure(1, weight=2)
+
+        self.copy_link_button = ttk.Button(
+            action_row,
+            text="Copy Link",
+            style="Ghost.TButton",
+            command=self.copy_download_links,
+        )
+        self.copy_link_button.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+
         self.download_button = ttk.Button(
-            output_card,
+            action_row,
             text="Download Section",
             style="Accent.TButton",
             command=self.start_download,
         )
-        self.download_button.grid(row=7, column=0, sticky="ew", pady=(18, 0))
+        self.download_button.grid(row=0, column=1, sticky="ew")
 
         history_card = ttk.Frame(right_column, style="Card.TFrame", padding=18)
         history_card.grid(row=2, column=0, sticky="nsew", pady=(18, 0))
@@ -1311,6 +1324,9 @@ class PortionDownloaderApp(tk.Tk):
                 elif kind == "done":
                     _, clip_jobs = item
                     self.on_download_finished(clip_jobs)
+                elif kind == "links_ready":
+                    _, links_text, link_count = item
+                    self.on_links_ready(links_text, link_count)
         except queue.Empty:
             pass
 
@@ -1366,6 +1382,7 @@ class PortionDownloaderApp(tk.Tk):
         download_state = "disabled" if busy or not self.video_info else "normal"
         self.fetch_button.configure(state=fetch_state)
         self.download_button.configure(state=download_state)
+        self.copy_link_button.configure(state=download_state)
         self.video_combo.configure(state="disabled" if busy or not self.video_options else "readonly")
         self.audio_combo.configure(state="disabled" if busy or not self.audio_options else "readonly")
         self.update_split_controls()
@@ -1431,6 +1448,81 @@ class PortionDownloaderApp(tk.Tk):
             if fmt.get("format_id") == option.get("format_id"):
                 return fmt
         raise RuntimeError("Selected audio format is no longer available.")
+
+    def copy_download_links(self) -> None:
+        if self._busy:
+            return
+        if yt_dlp is None:
+            messagebox.showerror(
+                "Missing yt-dlp",
+                "yt-dlp is not installed. Run: python -m pip install -r requirements.txt",
+            )
+            return
+        if not self.video_info:
+            messagebox.showerror("No Video Loaded", "Fetch formats before copying download links.")
+            return
+
+        video_option = self.selected_option(self.video_combo, self.video_options)
+        audio_option = self.selected_option(self.audio_combo, self.audio_options)
+        source_url = self.source_url()
+
+        self.set_busy(True)
+        self.start_indeterminate_progress()
+        self.status_var.set("Generating fresh direct download link...")
+
+        worker = threading.Thread(
+            target=self._copy_download_links_worker,
+            args=(video_option, audio_option, source_url),
+            daemon=True,
+        )
+        worker.start()
+
+    def _copy_download_links_worker(self, video_option: dict, audio_option: dict, source_url: str) -> None:
+        try:
+            with yt_dlp.YoutubeDL(ydl_options()) as ydl:
+                info = ydl.extract_info(source_url, download=False)
+
+            video_formats = collect_video_formats(info.get("formats") or [])
+            audio_formats = collect_audio_formats(info.get("formats") or [])
+            if not video_formats:
+                raise RuntimeError("No downloadable video formats were found.")
+            if audio_option["kind"] != "none" and not audio_formats:
+                raise RuntimeError("No downloadable audio formats were found.")
+
+            video_format = self.choose_video_format(video_option, video_formats)
+            audio_format = self.choose_audio_format(audio_option, audio_formats)
+            links = self.external_download_links(video_format, audio_format)
+            if not links:
+                raise RuntimeError("No direct download link was available for the selected format.")
+
+            self.ui_queue.put(("links_ready", "\n".join(links), len(links)))
+        except Exception as exc:
+            self.ui_queue.put(("error", f"Could not generate direct link: {exc}"))
+
+    def external_download_links(self, video_format: dict, audio_format: dict | None) -> list[str]:
+        links = []
+        video_url = video_format.get("url") or video_format.get("manifest_url")
+        if video_url:
+            links.append(video_url)
+
+        if audio_format and not same_media_resource(video_format, audio_format):
+            audio_url = audio_format.get("url") or audio_format.get("manifest_url")
+            if audio_url and audio_url not in links:
+                links.append(audio_url)
+
+        return links
+
+    def on_links_ready(self, links_text: str, link_count: int) -> None:
+        self.finish_busy()
+        self.copy_text_to_clipboard(links_text, self.link_copy_status(link_count))
+
+    def link_copy_status(self, link_count: int) -> str:
+        if link_count == 1:
+            return "Copied 1 direct source link. Start/end and split still require this app or another trimming tool."
+        return (
+            f"Copied {link_count} direct source links, usually video and audio separately. "
+            "Start/end and split still require this app or another trimming tool."
+        )
 
     def build_clip_jobs(self, start: float, end: float, output_folder: Path, raw_name: str) -> list[dict]:
         base_name = sanitize_filename(raw_name)

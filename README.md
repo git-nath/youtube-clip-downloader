@@ -8,6 +8,7 @@ Simple Windows desktop app for downloading only a selected portion of a YouTube 
 - provides a modern card-based desktop UI with a quick paste button
 - fetches available video and audio formats
 - lets you choose video resolution and audio format, including `Best` options
+- can copy fresh direct source links for use in an external downloader
 - clips only the selected start/end section
 - shows live clip length feedback while you edit timestamps
 - includes a preview timeline cursor for setting start/end times after formats are loaded
