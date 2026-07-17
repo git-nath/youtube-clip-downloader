@@ -768,12 +768,55 @@ class PortionDownloaderApp(tk.Tk):
         )
         self.download_button.grid(row=0, column=1, sticky="ew")
 
-        ttk.Label(output_card, text="Filename", style="Card.TLabel").grid(row=3, column=0, sticky="w")
-        ttk.Entry(output_card, textvariable=self.filename_var).grid(row=4, column=0, sticky="ew", pady=(6, 12))
+        status_row = ttk.Frame(output_card, style="Card.TFrame")
+        status_row.grid(row=3, column=0, sticky="ew")
+        status_row.columnconfigure(1, weight=1)
 
-        ttk.Label(output_card, text="Folder", style="Card.TLabel").grid(row=5, column=0, sticky="w")
+        ttk.Label(status_row, text="Status", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        self.progress_bar = ttk.Progressbar(
+            status_row,
+            mode="determinate",
+            maximum=100,
+            style="Modern.Horizontal.TProgressbar",
+        )
+        self.progress_bar.grid(row=0, column=1, sticky="ew", padx=(16, 0))
+        ttk.Label(status_row, textvariable=self.status_var, wraplength=430, justify="left", style="Status.TLabel").grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0)
+        )
+
+        final_row = ttk.Frame(output_card, style="Card.TFrame")
+        final_row.grid(row=4, column=0, sticky="ew", pady=(14, 0))
+        final_row.columnconfigure(1, weight=1)
+        ttk.Label(final_row, text="Final file", style="Card.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        ttk.Entry(final_row, textvariable=self.final_path_var, state="readonly").grid(row=0, column=1, sticky="ew")
+
+        self.open_file_button = ttk.Button(final_row, text="Open File", style="Ghost.TButton", command=self.open_file, state="disabled")
+        self.open_file_button.grid(row=0, column=2, sticky="e", padx=(10, 0))
+
+        self.open_folder_button = ttk.Button(
+            final_row,
+            text="Open Folder",
+            style="Ghost.TButton",
+            command=self.open_folder,
+            state="disabled",
+        )
+        self.open_folder_button.grid(row=0, column=3, sticky="e", padx=(8, 0))
+
+        self.copy_path_button = ttk.Button(
+            final_row,
+            text="Copy Path",
+            style="Ghost.TButton",
+            command=self.copy_final_path,
+            state="disabled",
+        )
+        self.copy_path_button.grid(row=0, column=4, sticky="e", padx=(8, 0))
+
+        ttk.Label(output_card, text="Filename", style="Card.TLabel").grid(row=5, column=0, sticky="w", pady=(14, 0))
+        ttk.Entry(output_card, textvariable=self.filename_var).grid(row=6, column=0, sticky="ew", pady=(6, 12))
+
+        ttk.Label(output_card, text="Folder", style="Card.TLabel").grid(row=7, column=0, sticky="w")
         folder_row = ttk.Frame(output_card, style="Card.TFrame")
-        folder_row.grid(row=6, column=0, sticky="ew", pady=(6, 0))
+        folder_row.grid(row=8, column=0, sticky="ew", pady=(6, 0))
         folder_row.columnconfigure(0, weight=1)
         ttk.Entry(folder_row, textvariable=self.folder_var).grid(row=0, column=0, sticky="ew")
         ttk.Button(folder_row, text="Browse", style="Ghost.TButton", command=self.choose_folder).grid(
@@ -781,7 +824,7 @@ class PortionDownloaderApp(tk.Tk):
         )
 
         ttk.Checkbutton(output_card, text="Remember this folder", variable=self.remember_folder_var).grid(
-            row=7, column=0, sticky="w", pady=(12, 0)
+            row=9, column=0, sticky="w", pady=(12, 0)
         )
 
         history_card = ttk.Frame(right_column, style="Card.TFrame", padding=18)
@@ -862,49 +905,6 @@ class PortionDownloaderApp(tk.Tk):
             command=self.clear_history,
         )
         self.clear_history_button.grid(row=0, column=3, sticky="w", padx=(8, 0))
-
-        status_card = ttk.Frame(root, style="Card.TFrame", padding=18)
-        status_card.grid(row=2, column=0, sticky="ew", pady=(18, 0))
-        status_card.columnconfigure(1, weight=1)
-
-        ttk.Label(status_card, text="Status", style="Section.TLabel").grid(row=0, column=0, sticky="w")
-        self.progress_bar = ttk.Progressbar(
-            status_card,
-            mode="determinate",
-            maximum=100,
-            style="Modern.Horizontal.TProgressbar",
-        )
-        self.progress_bar.grid(row=0, column=1, sticky="ew", padx=(16, 0))
-        ttk.Label(status_card, textvariable=self.status_var, wraplength=860, justify="left", style="Status.TLabel").grid(
-            row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
-        )
-
-        final_row = ttk.Frame(status_card, style="Card.TFrame")
-        final_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(14, 0))
-        final_row.columnconfigure(1, weight=1)
-        ttk.Label(final_row, text="Final file", style="Card.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
-        ttk.Entry(final_row, textvariable=self.final_path_var, state="readonly").grid(row=0, column=1, sticky="ew")
-
-        self.open_file_button = ttk.Button(final_row, text="Open File", style="Ghost.TButton", command=self.open_file, state="disabled")
-        self.open_file_button.grid(row=0, column=2, sticky="e", padx=(10, 0))
-
-        self.open_folder_button = ttk.Button(
-            final_row,
-            text="Open Folder",
-            style="Ghost.TButton",
-            command=self.open_folder,
-            state="disabled",
-        )
-        self.open_folder_button.grid(row=0, column=3, sticky="e", padx=(8, 0))
-
-        self.copy_path_button = ttk.Button(
-            final_row,
-            text="Copy Path",
-            style="Ghost.TButton",
-            command=self.copy_final_path,
-            state="disabled",
-        )
-        self.copy_path_button.grid(row=0, column=4, sticky="e", padx=(8, 0))
 
         self.refresh_history()
 
