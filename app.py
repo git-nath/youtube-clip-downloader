@@ -508,27 +508,13 @@ class PortionDownloaderApp(tk.Tk):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
-        root = ttk.Frame(self, style="App.TFrame", padding=18)
+        root = ttk.Frame(self, style="App.TFrame", padding=12)
         root.grid(sticky="nsew")
         root.columnconfigure(0, weight=1)
-        root.rowconfigure(1, weight=1)
-
-        hero = ttk.Frame(root, style="Hero.TFrame", padding=(20, 14))
-        hero.grid(row=0, column=0, sticky="ew")
-        hero.columnconfigure(0, weight=1)
-
-        ttk.Label(hero, text="PORTION STUDIO", style="HeroEyebrow.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(hero, text="Clip the exact moment, not the whole video.", style="HeroTitle.TLabel").grid(
-            row=1, column=0, sticky="w", pady=(4, 0)
-        )
-        ttk.Label(
-            hero,
-            text="Fetch quality options, trim by timestamp, export MP4, and keep recent clips close.",
-            style="HeroSubtitle.TLabel",
-        ).grid(row=2, column=0, sticky="w", pady=(6, 0))
+        root.rowconfigure(0, weight=1)
 
         content = ttk.Frame(root, style="App.TFrame")
-        content.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
+        content.grid(row=0, column=0, sticky="nsew")
         content.columnconfigure(0, weight=3, uniform="content")
         content.columnconfigure(1, weight=2, uniform="content")
         content.rowconfigure(0, weight=1)
