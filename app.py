@@ -21,7 +21,7 @@ except ImportError:
 
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1F]')
 DEFAULT_WINDOW_SIZE = "1040x780"
-HISTORY_LIMIT = 6
+HISTORY_LIMIT = 250
 MAX_SPLIT_PARTS = 100
 
 APP_BG = "#f5f1e8"
@@ -279,6 +279,22 @@ def ffmpeg_time(seconds: float) -> str:
     return format_seconds_for_display(seconds)
 
 
+def format_bytes(size_bytes: int) -> str:
+    if size_bytes <= 0:
+        return ""
+
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(size_bytes)
+    unit_index = 0
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024
+        unit_index += 1
+
+    if unit_index == 0:
+        return f"{int(size)} {units[unit_index]}"
+    return f"{size:.2f} {units[unit_index]}"
+
+
 def ydl_options() -> dict:
     return {
         "quiet": True,
@@ -520,12 +536,10 @@ class PortionDownloaderApp(tk.Tk):
         left_column = ttk.Frame(content, style="App.TFrame")
         left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
         left_column.columnconfigure(0, weight=1)
-        left_column.rowconfigure(2, weight=1)
 
         right_column = ttk.Frame(content, style="App.TFrame")
         right_column.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
         right_column.columnconfigure(0, weight=1)
-        right_column.rowconfigure(2, weight=1)
 
         source_card = ttk.Frame(left_column, style="Card.TFrame", padding=18)
         source_card.grid(row=0, column=0, sticky="ew")
@@ -599,7 +613,7 @@ class PortionDownloaderApp(tk.Tk):
         self.audio_combo.set("Fetch formats first")
 
         split_card = ttk.Frame(left_column, style="Card.TFrame", padding=18)
-        split_card.grid(row=2, column=0, sticky="nsew", pady=(18, 0))
+        split_card.grid(row=2, column=0, sticky="ew", pady=(18, 0))
         split_card.columnconfigure(0, weight=1)
 
         ttk.Label(split_card, text="Optional: Split Range", style="Section.TLabel").grid(row=0, column=0, sticky="w")
@@ -747,23 +761,8 @@ class PortionDownloaderApp(tk.Tk):
             row=1, column=0, sticky="w", pady=(4, 12)
         )
 
-        ttk.Label(output_card, text="Filename", style="Card.TLabel").grid(row=2, column=0, sticky="w")
-        ttk.Entry(output_card, textvariable=self.filename_var).grid(row=3, column=0, sticky="ew", pady=(6, 12))
-
-        ttk.Label(output_card, text="Folder", style="Card.TLabel").grid(row=4, column=0, sticky="w")
-        folder_row = ttk.Frame(output_card, style="Card.TFrame")
-        folder_row.grid(row=5, column=0, sticky="ew", pady=(6, 0))
-        folder_row.columnconfigure(0, weight=1)
-        ttk.Entry(folder_row, textvariable=self.folder_var).grid(row=0, column=0, sticky="ew")
-        ttk.Button(folder_row, text="Browse", style="Ghost.TButton", command=self.choose_folder).grid(
-            row=0, column=1, padx=(10, 0)
-        )
-
-        ttk.Checkbutton(output_card, text="Remember this folder", variable=self.remember_folder_var).grid(
-            row=6, column=0, sticky="w", pady=(12, 0)
-        )
         action_row = ttk.Frame(output_card, style="Card.TFrame")
-        action_row.grid(row=7, column=0, sticky="ew", pady=(18, 0))
+        action_row.grid(row=2, column=0, sticky="ew", pady=(0, 14))
         action_row.columnconfigure(0, weight=1)
         action_row.columnconfigure(1, weight=2)
 
@@ -782,6 +781,22 @@ class PortionDownloaderApp(tk.Tk):
             command=self.start_download,
         )
         self.download_button.grid(row=0, column=1, sticky="ew")
+
+        ttk.Label(output_card, text="Filename", style="Card.TLabel").grid(row=3, column=0, sticky="w")
+        ttk.Entry(output_card, textvariable=self.filename_var).grid(row=4, column=0, sticky="ew", pady=(6, 12))
+
+        ttk.Label(output_card, text="Folder", style="Card.TLabel").grid(row=5, column=0, sticky="w")
+        folder_row = ttk.Frame(output_card, style="Card.TFrame")
+        folder_row.grid(row=6, column=0, sticky="ew", pady=(6, 0))
+        folder_row.columnconfigure(0, weight=1)
+        ttk.Entry(folder_row, textvariable=self.folder_var).grid(row=0, column=0, sticky="ew")
+        ttk.Button(folder_row, text="Browse", style="Ghost.TButton", command=self.choose_folder).grid(
+            row=0, column=1, padx=(10, 0)
+        )
+
+        ttk.Checkbutton(output_card, text="Remember this folder", variable=self.remember_folder_var).grid(
+            row=7, column=0, sticky="w", pady=(12, 0)
+        )
 
         history_card = ttk.Frame(right_column, style="Card.TFrame", padding=18)
         history_card.grid(row=2, column=0, sticky="nsew", pady=(18, 0))
