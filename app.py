@@ -24,15 +24,15 @@ DEFAULT_WINDOW_SIZE = "1040x780"
 HISTORY_LIMIT = 250
 MAX_SPLIT_PARTS = 100
 
-APP_BG = "#f5f1e8"
-CARD_BG = "#fffaf0"
-HERO_BG = "#113f3c"
-INK = "#1d2b2a"
-MUTED = "#667572"
-ACCENT = "#0f766e"
-ACCENT_DARK = "#0b5f59"
-BORDER = "#ded6c8"
-SOFT_ACCENT = "#e3f4ef"
+APP_BG = "#0b1114"
+CARD_BG = "#111a20"
+HERO_BG = "#0f2326"
+INK = "#e7eef2"
+MUTED = "#96a4ad"
+ACCENT = "#2dd4bf"
+ACCENT_DARK = "#14b8a6"
+BORDER = "#22313a"
+SOFT_ACCENT = "#16262d"
 
 
 def format_has_video(fmt: dict | None) -> bool:
@@ -459,27 +459,27 @@ class PortionDownloaderApp(tk.Tk):
         style.configure("Card.TLabel", background=CARD_BG, foreground=INK)
         style.configure("Muted.TLabel", background=CARD_BG, foreground=MUTED, font=small_font)
         style.configure("Section.TLabel", background=CARD_BG, foreground=INK, font=section_font)
-        style.configure("HeroTitle.TLabel", background=HERO_BG, foreground="#fff7e8", font=title_font)
-        style.configure("HeroSubtitle.TLabel", background=HERO_BG, foreground="#d6ebe7", font=("Segoe UI", 10))
-        style.configure("HeroEyebrow.TLabel", background=HERO_BG, foreground="#f6d18b", font=("Segoe UI Semibold", 9))
-        style.configure("HeroBadge.TLabel", background="#1b5550", foreground="#f8ead0", font=small_font, padding=(10, 5))
-        style.configure("Pill.TLabel", background=SOFT_ACCENT, foreground=ACCENT_DARK, font=small_font, padding=(10, 5))
+        style.configure("HeroTitle.TLabel", background=HERO_BG, foreground="#f6fafc", font=title_font)
+        style.configure("HeroSubtitle.TLabel", background=HERO_BG, foreground="#c9d7de", font=("Segoe UI", 10))
+        style.configure("HeroEyebrow.TLabel", background=HERO_BG, foreground="#5eead4", font=("Segoe UI Semibold", 9))
+        style.configure("HeroBadge.TLabel", background="#173238", foreground="#dbfaf6", font=small_font, padding=(10, 5))
+        style.configure("Pill.TLabel", background="#172831", foreground="#8ef3e5", font=small_font, padding=(10, 5))
         style.configure("Status.TLabel", background=CARD_BG, foreground=INK)
 
-        style.configure("TEntry", fieldbackground="#fffcf6", foreground=INK, bordercolor=BORDER, lightcolor=BORDER)
-        style.configure("TCombobox", fieldbackground="#fffcf6", foreground=INK, bordercolor=BORDER, arrowcolor=ACCENT)
+        style.configure("TEntry", fieldbackground="#0e161b", foreground=INK, bordercolor=BORDER, lightcolor=BORDER, insertcolor=INK)
+        style.configure("TCombobox", fieldbackground="#0e161b", foreground=INK, bordercolor=BORDER, arrowcolor=ACCENT)
         style.configure("TCheckbutton", background=CARD_BG, foreground=INK)
 
-        style.configure("TButton", padding=(12, 8), background="#efe6d8", foreground=INK, bordercolor=BORDER)
-        style.map("TButton", background=[("active", "#e6dccb")])
-        style.configure("Accent.TButton", background=ACCENT, foreground="white", bordercolor=ACCENT)
-        style.map("Accent.TButton", background=[("active", ACCENT_DARK), ("disabled", "#9eb8b2")])
-        style.configure("Ghost.TButton", background=CARD_BG, foreground=ACCENT_DARK, bordercolor=BORDER, padding=(10, 6))
-        style.map("Ghost.TButton", background=[("active", SOFT_ACCENT)])
+        style.configure("TButton", padding=(12, 8), background="#18232a", foreground=INK, bordercolor=BORDER)
+        style.map("TButton", background=[("active", "#21313a"), ("disabled", "#10181d")], foreground=[("disabled", "#6f7f88")])
+        style.configure("Accent.TButton", background=ACCENT, foreground="#04181a", bordercolor=ACCENT)
+        style.map("Accent.TButton", background=[("active", ACCENT_DARK), ("disabled", "#2c4b49")], foreground=[("disabled", "#a7b8b8")])
+        style.configure("Ghost.TButton", background=CARD_BG, foreground=ACCENT, bordercolor=BORDER, padding=(10, 6))
+        style.map("Ghost.TButton", background=[("active", SOFT_ACCENT)], foreground=[("active", "#bffcf4")])
         style.configure(
             "History.Treeview",
-            background="#fffcf6",
-            fieldbackground="#fffcf6",
+            background="#0e161b",
+            fieldbackground="#0e161b",
             foreground=INK,
             bordercolor=BORDER,
             borderwidth=1,
@@ -488,18 +488,18 @@ class PortionDownloaderApp(tk.Tk):
         )
         style.configure(
             "History.Treeview.Heading",
-            background="#efe6d8",
+            background="#18242b",
             foreground=INK,
             font=("Segoe UI Semibold", 9),
             relief="flat",
         )
-        style.map("History.Treeview", background=[("selected", ACCENT)], foreground=[("selected", "white")])
+        style.map("History.Treeview", background=[("selected", ACCENT)], foreground=[("selected", "#04181a")])
 
         style.configure(
             "Modern.Horizontal.TProgressbar",
             background=ACCENT,
-            troughcolor="#e6dccb",
-            bordercolor="#e6dccb",
+            troughcolor="#18242b",
+            bordercolor="#18242b",
             lightcolor=ACCENT,
             darkcolor=ACCENT,
         )
