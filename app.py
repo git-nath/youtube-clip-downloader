@@ -295,13 +295,31 @@ def format_bytes(size_bytes: int) -> str:
     return f"{size:.2f} {units[unit_index]}"
 
 
-def ydl_options() -> dict:
-    return {
+def add_cookie_hint(message: str, cookiefile: str | None) -> str:
+    lowered = message.lower()
+    auth_issue = (
+        "sign in to confirm you're not a bot" in lowered
+        or "sign in to confirm you're not a bot" in lowered.replace("’", "'")
+        or "cookies" in lowered and "authenticate" in lowered
+    )
+    if not auth_issue:
+        return message
+
+    if cookiefile:
+        return message + " Refresh the cookies.txt file if your login expired."
+    return message + " Add a cookies.txt file exported from a browser logged into YouTube."
+
+
+def ydl_options(cookiefile: str | None = None) -> dict:
+    options = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
     }
+    if cookiefile:
+        options["cookiefile"] = cookiefile
+    return options
 
 
 def build_ydl_format_selector(video_format: dict, audio_format: dict | None) -> str:
@@ -316,8 +334,14 @@ def build_ydl_format_selector(video_format: dict, audio_format: dict | None) -> 
     return f"{video_id}+{audio_id}/{video_id}/best"
 
 
-def ydl_download_options(temp_path: Path, video_format: dict, audio_format: dict | None, progress_hook) -> dict:
-    return {
+def ydl_download_options(
+    temp_path: Path,
+    video_format: dict,
+    audio_format: dict | None,
+    progress_hook,
+    cookiefile: str | None = None,
+) -> dict:
+    options = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -326,6 +350,9 @@ def ydl_download_options(temp_path: Path, video_format: dict, audio_format: dict
         "merge_output_format": "mp4",
         "progress_hooks": [progress_hook],
     }
+    if cookiefile:
+        options["cookiefile"] = cookiefile
+    return options
 
 
 class PortionDownloaderApp(tk.Tk):
@@ -368,6 +395,7 @@ class PortionDownloaderApp(tk.Tk):
         self.split_summary_var = tk.StringVar(value="Split is off. Download creates one file.")
         self.filename_var = tk.StringVar()
         self.folder_var = tk.StringVar(value=str(self.initial_output_folder()))
+        self.cookiefile_var = tk.StringVar(value=str(self.settings.get("cookiefile", "")))
         self.remember_folder_var = tk.BooleanVar(value=bool(self.settings.get("remember_folder")))
         self.status_var = tk.StringVar(value="Ready.")
         self.final_path_var = tk.StringVar(value="")
@@ -381,6 +409,7 @@ class PortionDownloaderApp(tk.Tk):
         self.split_enabled_var.trace_add("write", self.on_split_changed)
         self.split_length_var.trace_add("write", self.on_split_changed)
         self.folder_var.trace_add("write", self.on_folder_changed)
+        self.cookiefile_var.trace_add("write", self.on_cookiefile_changed)
         self.remember_folder_var.trace_add("write", self.on_folder_preference_changed)
 
         self.update_clip_length()
@@ -424,6 +453,7 @@ class PortionDownloaderApp(tk.Tk):
         payload = {
             "remember_folder": bool(self.remember_folder_var.get()),
             "output_folder": self.folder_var.get().strip() if self.remember_folder_var.get() else "",
+            "cookiefile": self.cookiefile_var.get().strip(),
             "download_history": history[:HISTORY_LIMIT],
         }
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -827,6 +857,22 @@ class PortionDownloaderApp(tk.Tk):
             row=9, column=0, sticky="w", pady=(12, 0)
         )
 
+        ttk.Label(output_card, text="Cookies (optional)", style="Card.TLabel").grid(row=10, column=0, sticky="w", pady=(14, 0))
+        cookie_row = ttk.Frame(output_card, style="Card.TFrame")
+        cookie_row.grid(row=11, column=0, sticky="ew", pady=(6, 0))
+        cookie_row.columnconfigure(0, weight=1)
+        ttk.Entry(cookie_row, textvariable=self.cookiefile_var).grid(row=0, column=0, sticky="ew")
+        ttk.Button(cookie_row, text="Browse", style="Ghost.TButton", command=self.choose_cookie_file).grid(
+            row=0, column=1, padx=(10, 0)
+        )
+        ttk.Label(
+            output_card,
+            text="Use a cookies.txt file exported from a logged-in browser when YouTube asks you to sign in.",
+            style="Muted.TLabel",
+            wraplength=430,
+            justify="left",
+        ).grid(row=12, column=0, sticky="ew", pady=(6, 0))
+
         history_card = ttk.Frame(right_column, style="Card.TFrame", padding=18)
         history_card.grid(row=2, column=0, sticky="nsew", pady=(18, 0))
         history_card.columnconfigure(0, weight=1)
@@ -941,6 +987,9 @@ class PortionDownloaderApp(tk.Tk):
     def on_folder_changed(self, *_args) -> None:
         if self.remember_folder_var.get():
             self.save_settings()
+
+    def on_cookiefile_changed(self, *_args) -> None:
+        self.save_settings()
 
     def update_clip_length(self) -> None:
         if not self.end_var.get().strip():
@@ -1250,6 +1299,47 @@ class PortionDownloaderApp(tk.Tk):
         if self.remember_folder_var.get():
             self.save_settings()
 
+    def choose_cookie_file(self) -> None:
+        initial_dir = str(Path(self.cookiefile_var.get().strip()).parent) if self.cookiefile_var.get().strip() else str(Path.home())
+        chosen = filedialog.askopenfilename(
+            initialdir=initial_dir,
+            title="Choose cookies.txt",
+            filetypes=[("Cookies text file", "*.txt"), ("All files", "*.*")],
+        )
+        if not chosen:
+            return
+        self.cookiefile_var.set(chosen)
+
+    def cookiefile_or_none(self) -> str | None:
+        cookiefile_text = self.cookiefile_var.get().strip()
+        if not cookiefile_text:
+            return None
+
+        cookie_path = Path(cookiefile_text)
+        if not cookie_path.exists():
+            raise FileNotFoundError(f"Cookies file not found: {cookie_path}")
+        if not cookie_path.is_file():
+            raise FileNotFoundError(f"Cookies file is not a file: {cookie_path}")
+        return str(cookie_path)
+
+    def ydl_options(self) -> dict:
+        return ydl_options(self.cookiefile_or_none())
+
+    def ydl_download_options(
+        self,
+        temp_path: Path,
+        video_format: dict,
+        audio_format: dict | None,
+        progress_hook,
+    ) -> dict:
+        return ydl_download_options(
+            temp_path=temp_path,
+            video_format=video_format,
+            audio_format=audio_format,
+            progress_hook=progress_hook,
+            cookiefile=self.cookiefile_or_none(),
+        )
+
     def fetch_formats(self) -> None:
         if self._busy:
             return
@@ -1258,6 +1348,12 @@ class PortionDownloaderApp(tk.Tk):
                 "Missing yt-dlp",
                 "yt-dlp is not installed. Run: python -m pip install -r requirements.txt",
             )
+            return
+
+        try:
+            cookiefile = self.cookiefile_or_none()
+        except FileNotFoundError as exc:
+            messagebox.showerror("Missing Cookies File", str(exc))
             return
 
         url = self.url_var.get().strip()
@@ -1276,12 +1372,12 @@ class PortionDownloaderApp(tk.Tk):
         self.start_indeterminate_progress()
         self.status_var.set("Fetching formats...")
 
-        worker = threading.Thread(target=self._fetch_formats_worker, args=(url,), daemon=True)
+        worker = threading.Thread(target=self._fetch_formats_worker, args=(url, cookiefile), daemon=True)
         worker.start()
 
-    def _fetch_formats_worker(self, url: str) -> None:
+    def _fetch_formats_worker(self, url: str, cookiefile: str | None) -> None:
         try:
-            with yt_dlp.YoutubeDL(ydl_options()) as ydl:
+            with yt_dlp.YoutubeDL(ydl_options(cookiefile)) as ydl:
                 info = ydl.extract_info(url, download=False)
 
             if not info:
@@ -1298,7 +1394,7 @@ class PortionDownloaderApp(tk.Tk):
 
             self.ui_queue.put(("formats_loaded", info, video_formats, audio_formats))
         except Exception as exc:
-            self.ui_queue.put(("error", f"Could not fetch formats: {exc}"))
+            self.ui_queue.put(("error", f"Could not fetch formats: {add_cookie_hint(str(exc), cookiefile)}"))
 
     def process_queue(self) -> None:
         try:
@@ -1463,6 +1559,12 @@ class PortionDownloaderApp(tk.Tk):
             messagebox.showerror("No Video Loaded", "Fetch formats before copying download links.")
             return
 
+        try:
+            cookiefile = self.cookiefile_or_none()
+        except FileNotFoundError as exc:
+            messagebox.showerror("Missing Cookies File", str(exc))
+            return
+
         video_option = self.selected_option(self.video_combo, self.video_options)
         audio_option = self.selected_option(self.audio_combo, self.audio_options)
         source_url = self.source_url()
@@ -1473,14 +1575,20 @@ class PortionDownloaderApp(tk.Tk):
 
         worker = threading.Thread(
             target=self._copy_download_links_worker,
-            args=(video_option, audio_option, source_url),
+            args=(video_option, audio_option, source_url, cookiefile),
             daemon=True,
         )
         worker.start()
 
-    def _copy_download_links_worker(self, video_option: dict, audio_option: dict, source_url: str) -> None:
+    def _copy_download_links_worker(
+        self,
+        video_option: dict,
+        audio_option: dict,
+        source_url: str,
+        cookiefile: str | None,
+    ) -> None:
         try:
-            with yt_dlp.YoutubeDL(ydl_options()) as ydl:
+            with yt_dlp.YoutubeDL(ydl_options(cookiefile)) as ydl:
                 info = ydl.extract_info(source_url, download=False)
 
             video_formats = collect_video_formats(info.get("formats") or [])
@@ -1498,7 +1606,7 @@ class PortionDownloaderApp(tk.Tk):
 
             self.ui_queue.put(("links_ready", "\n".join(links), len(links)))
         except Exception as exc:
-            self.ui_queue.put(("error", f"Could not generate direct link: {exc}"))
+            self.ui_queue.put(("error", f"Could not generate direct link: {add_cookie_hint(str(exc), cookiefile)}"))
 
     def external_download_links(self, video_format: dict, audio_format: dict | None) -> list[str]:
         links = []
@@ -1609,6 +1717,12 @@ class PortionDownloaderApp(tk.Tk):
         if self.remember_folder_var.get():
             self.save_settings()
 
+        try:
+            cookiefile = self.cookiefile_or_none()
+        except FileNotFoundError as exc:
+            messagebox.showerror("Missing Cookies File", str(exc))
+            return
+
         self.output_path = None
         self.output_paths = []
         self.final_path_var.set("")
@@ -1624,7 +1738,7 @@ class PortionDownloaderApp(tk.Tk):
 
         worker = threading.Thread(
             target=self._download_worker,
-            args=(clip_jobs, video_option, audio_option, source_url),
+            args=(clip_jobs, video_option, audio_option, source_url, cookiefile),
             daemon=True,
         )
         worker.start()
@@ -1635,6 +1749,7 @@ class PortionDownloaderApp(tk.Tk):
         video_option: dict,
         audio_option: dict,
         source_url: str,
+        cookiefile: str | None,
     ) -> None:
         ffmpeg_path = shutil.which("ffmpeg")
         if not ffmpeg_path:
@@ -1646,7 +1761,7 @@ class PortionDownloaderApp(tk.Tk):
                 raise RuntimeError("yt-dlp is not installed. Run: python -m pip install -r requirements.txt")
 
             self.ui_queue.put(("status", "Refreshing stream URLs..."))
-            with yt_dlp.YoutubeDL(ydl_options()) as ydl:
+            with yt_dlp.YoutubeDL(ydl_options(cookiefile)) as ydl:
                 info = ydl.extract_info(source_url, download=False)
 
             video_formats = collect_video_formats(info.get("formats") or [])
@@ -1666,6 +1781,7 @@ class PortionDownloaderApp(tk.Tk):
                     audio_format=audio_format,
                     clip_jobs=clip_jobs,
                     ffmpeg_path=ffmpeg_path,
+                    cookiefile=cookiefile,
                 )
             else:
                 self.ui_queue.put(("status", "Starting direct stream clip..."))
@@ -1681,11 +1797,12 @@ class PortionDownloaderApp(tk.Tk):
                         audio_format=audio_format,
                         clip_jobs=clip_jobs,
                         ffmpeg_path=ffmpeg_path,
+                        cookiefile=cookiefile,
                     )
 
             self.ui_queue.put(("done", clip_jobs))
         except Exception as exc:
-            self.ui_queue.put(("error", f"Download failed: {exc}"))
+            self.ui_queue.put(("error", f"Download failed: {add_cookie_hint(str(exc), cookiefile)}"))
 
     def should_retry_with_local_source(self, exc: RuntimeError, source_url: str) -> bool:
         message = str(exc).lower()
@@ -1771,6 +1888,7 @@ class PortionDownloaderApp(tk.Tk):
         audio_format: dict | None,
         clip_jobs: list[dict],
         ffmpeg_path: str,
+        cookiefile: str | None,
     ) -> None:
         with tempfile.TemporaryDirectory(prefix="portion_downloader_") as temp_dir:
             temp_path = Path(temp_dir)
@@ -1780,6 +1898,7 @@ class PortionDownloaderApp(tk.Tk):
                 video_format=video_format,
                 audio_format=audio_format,
                 progress_hook=self.ytdlp_progress_hook,
+                cookiefile=cookiefile,
             )
             with yt_dlp.YoutubeDL(download_opts) as ydl:
                 downloaded_info = ydl.extract_info(source_url, download=True)
