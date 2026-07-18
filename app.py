@@ -23,6 +23,7 @@ INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1F]')
 DEFAULT_WINDOW_SIZE = "1040x780"
 HISTORY_LIMIT = 250
 MAX_SPLIT_PARTS = 100
+COOKIE_BROWSERS = ["chrome", "edge", "firefox", "brave", "opera"]
 
 APP_BG = "#0b1114"
 CARD_BG = "#111a20"
@@ -295,7 +296,7 @@ def format_bytes(size_bytes: int) -> str:
     return f"{size:.2f} {units[unit_index]}"
 
 
-def add_cookie_hint(message: str, cookiefile: str | None) -> str:
+def add_cookie_hint(message: str, cookiefile: str | None, cookies_from_browser: str | None) -> str:
     lowered = message.lower()
     auth_issue = (
         "sign in to confirm you're not a bot" in lowered
@@ -307,10 +308,12 @@ def add_cookie_hint(message: str, cookiefile: str | None) -> str:
 
     if cookiefile:
         return message + " Refresh the cookies.txt file if your login expired."
+    if cookies_from_browser:
+        return message + f" Try a different browser profile or sign in again in {cookies_from_browser}."
     return message + " Add a cookies.txt file exported from a browser logged into YouTube."
 
 
-def ydl_options(cookiefile: str | None = None) -> dict:
+def ydl_options(cookiefile: str | None = None, cookies_from_browser: str | None = None) -> dict:
     options = {
         "quiet": True,
         "no_warnings": True,
@@ -319,6 +322,8 @@ def ydl_options(cookiefile: str | None = None) -> dict:
     }
     if cookiefile:
         options["cookiefile"] = cookiefile
+    elif cookies_from_browser:
+        options["cookiesfrombrowser"] = (cookies_from_browser,)
     return options
 
 
@@ -340,6 +345,7 @@ def ydl_download_options(
     audio_format: dict | None,
     progress_hook,
     cookiefile: str | None = None,
+    cookies_from_browser: str | None = None,
 ) -> dict:
     options = {
         "quiet": True,
@@ -352,6 +358,8 @@ def ydl_download_options(
     }
     if cookiefile:
         options["cookiefile"] = cookiefile
+    elif cookies_from_browser:
+        options["cookiesfrombrowser"] = (cookies_from_browser,)
     return options
 
 
@@ -395,7 +403,9 @@ class PortionDownloaderApp(tk.Tk):
         self.split_summary_var = tk.StringVar(value="Split is off. Download creates one file.")
         self.filename_var = tk.StringVar()
         self.folder_var = tk.StringVar(value=str(self.initial_output_folder()))
+        self.cookie_mode_var = tk.StringVar(value=str(self.settings.get("cookie_mode", "none")))
         self.cookiefile_var = tk.StringVar(value=str(self.settings.get("cookiefile", "")))
+        self.cookie_browser_var = tk.StringVar(value=str(self.settings.get("cookie_browser", "chrome")))
         self.remember_folder_var = tk.BooleanVar(value=bool(self.settings.get("remember_folder")))
         self.status_var = tk.StringVar(value="Ready.")
         self.final_path_var = tk.StringVar(value="")
@@ -409,7 +419,9 @@ class PortionDownloaderApp(tk.Tk):
         self.split_enabled_var.trace_add("write", self.on_split_changed)
         self.split_length_var.trace_add("write", self.on_split_changed)
         self.folder_var.trace_add("write", self.on_folder_changed)
+        self.cookie_mode_var.trace_add("write", self.on_cookie_settings_changed)
         self.cookiefile_var.trace_add("write", self.on_cookiefile_changed)
+        self.cookie_browser_var.trace_add("write", self.on_cookie_settings_changed)
         self.remember_folder_var.trace_add("write", self.on_folder_preference_changed)
 
         self.update_clip_length()
@@ -453,7 +465,9 @@ class PortionDownloaderApp(tk.Tk):
         payload = {
             "remember_folder": bool(self.remember_folder_var.get()),
             "output_folder": self.folder_var.get().strip() if self.remember_folder_var.get() else "",
+            "cookie_mode": self.cookie_mode_var.get().strip(),
             "cookiefile": self.cookiefile_var.get().strip(),
+            "cookie_browser": self.cookie_browser_var.get().strip(),
             "download_history": history[:HISTORY_LIMIT],
         }
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -857,9 +871,35 @@ class PortionDownloaderApp(tk.Tk):
             row=9, column=0, sticky="w", pady=(12, 0)
         )
 
-        ttk.Label(output_card, text="Cookies (optional)", style="Card.TLabel").grid(row=10, column=0, sticky="w", pady=(14, 0))
+        ttk.Label(output_card, text="Cookies source", style="Card.TLabel").grid(row=10, column=0, sticky="w", pady=(14, 0))
+        cookie_mode_row = ttk.Frame(output_card, style="Card.TFrame")
+        cookie_mode_row.grid(row=11, column=0, sticky="ew", pady=(6, 0))
+        cookie_mode_row.columnconfigure(0, weight=1)
+        self.cookie_mode_combo = ttk.Combobox(
+            cookie_mode_row,
+            textvariable=self.cookie_mode_var,
+            state="readonly",
+            values=["none", "file", "browser"],
+        )
+        self.cookie_mode_combo.grid(row=0, column=0, sticky="ew")
+
+        ttk.Label(output_card, text="Browser", style="Card.TLabel").grid(row=12, column=0, sticky="w", pady=(12, 0))
+        browser_row = ttk.Frame(output_card, style="Card.TFrame")
+        browser_row.grid(row=13, column=0, sticky="ew", pady=(6, 0))
+        browser_row.columnconfigure(0, weight=1)
+        self.cookie_browser_combo = ttk.Combobox(
+            browser_row,
+            textvariable=self.cookie_browser_var,
+            state="readonly",
+            values=COOKIE_BROWSERS,
+        )
+        self.cookie_browser_combo.grid(row=0, column=0, sticky="ew")
+
+        ttk.Label(output_card, text="Cookies file (optional)", style="Card.TLabel").grid(
+            row=14, column=0, sticky="w", pady=(14, 0)
+        )
         cookie_row = ttk.Frame(output_card, style="Card.TFrame")
-        cookie_row.grid(row=11, column=0, sticky="ew", pady=(6, 0))
+        cookie_row.grid(row=15, column=0, sticky="ew", pady=(6, 0))
         cookie_row.columnconfigure(0, weight=1)
         ttk.Entry(cookie_row, textvariable=self.cookiefile_var).grid(row=0, column=0, sticky="ew")
         ttk.Button(cookie_row, text="Browse", style="Ghost.TButton", command=self.choose_cookie_file).grid(
@@ -871,7 +911,7 @@ class PortionDownloaderApp(tk.Tk):
             style="Muted.TLabel",
             wraplength=430,
             justify="left",
-        ).grid(row=12, column=0, sticky="ew", pady=(6, 0))
+        ).grid(row=16, column=0, sticky="ew", pady=(6, 0))
 
         history_card = ttk.Frame(right_column, style="Card.TFrame", padding=18)
         history_card.grid(row=2, column=0, sticky="nsew", pady=(18, 0))
@@ -987,6 +1027,9 @@ class PortionDownloaderApp(tk.Tk):
     def on_folder_changed(self, *_args) -> None:
         if self.remember_folder_var.get():
             self.save_settings()
+
+    def on_cookie_settings_changed(self, *_args) -> None:
+        self.save_settings()
 
     def on_cookiefile_changed(self, *_args) -> None:
         self.save_settings()
@@ -1310,20 +1353,31 @@ class PortionDownloaderApp(tk.Tk):
             return
         self.cookiefile_var.set(chosen)
 
-    def cookiefile_or_none(self) -> str | None:
-        cookiefile_text = self.cookiefile_var.get().strip()
-        if not cookiefile_text:
-            return None
+    def cookie_settings(self) -> tuple[str | None, str | None]:
+        mode = self.cookie_mode_var.get().strip().lower()
+        if mode == "file":
+            cookiefile_text = self.cookiefile_var.get().strip()
+            if not cookiefile_text:
+                raise FileNotFoundError("Choose a cookies.txt file or switch Cookie source to browser.")
 
-        cookie_path = Path(cookiefile_text)
-        if not cookie_path.exists():
-            raise FileNotFoundError(f"Cookies file not found: {cookie_path}")
-        if not cookie_path.is_file():
-            raise FileNotFoundError(f"Cookies file is not a file: {cookie_path}")
-        return str(cookie_path)
+            cookie_path = Path(cookiefile_text)
+            if not cookie_path.exists():
+                raise FileNotFoundError(f"Cookies file not found: {cookie_path}")
+            if not cookie_path.is_file():
+                raise FileNotFoundError(f"Cookies file is not a file: {cookie_path}")
+            return str(cookie_path), None
+
+        if mode == "browser":
+            browser = self.cookie_browser_var.get().strip().lower()
+            if browser not in COOKIE_BROWSERS:
+                raise ValueError(f"Choose a supported browser: {', '.join(COOKIE_BROWSERS)}")
+            return None, browser
+
+        return None, None
 
     def ydl_options(self) -> dict:
-        return ydl_options(self.cookiefile_or_none())
+        cookiefile, cookies_from_browser = self.cookie_settings()
+        return ydl_options(cookiefile, cookies_from_browser)
 
     def ydl_download_options(
         self,
@@ -1332,12 +1386,14 @@ class PortionDownloaderApp(tk.Tk):
         audio_format: dict | None,
         progress_hook,
     ) -> dict:
+        cookiefile, cookies_from_browser = self.cookie_settings()
         return ydl_download_options(
             temp_path=temp_path,
             video_format=video_format,
             audio_format=audio_format,
             progress_hook=progress_hook,
-            cookiefile=self.cookiefile_or_none(),
+            cookiefile=cookiefile,
+            cookies_from_browser=cookies_from_browser,
         )
 
     def fetch_formats(self) -> None:
@@ -1351,9 +1407,9 @@ class PortionDownloaderApp(tk.Tk):
             return
 
         try:
-            cookiefile = self.cookiefile_or_none()
-        except FileNotFoundError as exc:
-            messagebox.showerror("Missing Cookies File", str(exc))
+            cookiefile, cookies_from_browser = self.cookie_settings()
+        except (FileNotFoundError, ValueError) as exc:
+            messagebox.showerror("Cookies Setup", str(exc))
             return
 
         url = self.url_var.get().strip()
@@ -1372,12 +1428,12 @@ class PortionDownloaderApp(tk.Tk):
         self.start_indeterminate_progress()
         self.status_var.set("Fetching formats...")
 
-        worker = threading.Thread(target=self._fetch_formats_worker, args=(url, cookiefile), daemon=True)
+        worker = threading.Thread(target=self._fetch_formats_worker, args=(url, cookiefile, cookies_from_browser), daemon=True)
         worker.start()
 
-    def _fetch_formats_worker(self, url: str, cookiefile: str | None) -> None:
+    def _fetch_formats_worker(self, url: str, cookiefile: str | None, cookies_from_browser: str | None) -> None:
         try:
-            with yt_dlp.YoutubeDL(ydl_options(cookiefile)) as ydl:
+            with yt_dlp.YoutubeDL(ydl_options(cookiefile, cookies_from_browser)) as ydl:
                 info = ydl.extract_info(url, download=False)
 
             if not info:
@@ -1394,7 +1450,7 @@ class PortionDownloaderApp(tk.Tk):
 
             self.ui_queue.put(("formats_loaded", info, video_formats, audio_formats))
         except Exception as exc:
-            self.ui_queue.put(("error", f"Could not fetch formats: {add_cookie_hint(str(exc), cookiefile)}"))
+            self.ui_queue.put(("error", f"Could not fetch formats: {add_cookie_hint(str(exc), cookiefile, cookies_from_browser)}"))
 
     def process_queue(self) -> None:
         try:
@@ -1560,9 +1616,9 @@ class PortionDownloaderApp(tk.Tk):
             return
 
         try:
-            cookiefile = self.cookiefile_or_none()
-        except FileNotFoundError as exc:
-            messagebox.showerror("Missing Cookies File", str(exc))
+            cookiefile, cookies_from_browser = self.cookie_settings()
+        except (FileNotFoundError, ValueError) as exc:
+            messagebox.showerror("Cookies Setup", str(exc))
             return
 
         video_option = self.selected_option(self.video_combo, self.video_options)
@@ -1575,7 +1631,7 @@ class PortionDownloaderApp(tk.Tk):
 
         worker = threading.Thread(
             target=self._copy_download_links_worker,
-            args=(video_option, audio_option, source_url, cookiefile),
+            args=(video_option, audio_option, source_url, cookiefile, cookies_from_browser),
             daemon=True,
         )
         worker.start()
@@ -1586,9 +1642,10 @@ class PortionDownloaderApp(tk.Tk):
         audio_option: dict,
         source_url: str,
         cookiefile: str | None,
+        cookies_from_browser: str | None,
     ) -> None:
         try:
-            with yt_dlp.YoutubeDL(ydl_options(cookiefile)) as ydl:
+            with yt_dlp.YoutubeDL(ydl_options(cookiefile, cookies_from_browser)) as ydl:
                 info = ydl.extract_info(source_url, download=False)
 
             video_formats = collect_video_formats(info.get("formats") or [])
@@ -1606,7 +1663,7 @@ class PortionDownloaderApp(tk.Tk):
 
             self.ui_queue.put(("links_ready", "\n".join(links), len(links)))
         except Exception as exc:
-            self.ui_queue.put(("error", f"Could not generate direct link: {add_cookie_hint(str(exc), cookiefile)}"))
+            self.ui_queue.put(("error", f"Could not generate direct link: {add_cookie_hint(str(exc), cookiefile, cookies_from_browser)}"))
 
     def external_download_links(self, video_format: dict, audio_format: dict | None) -> list[str]:
         links = []
@@ -1718,9 +1775,9 @@ class PortionDownloaderApp(tk.Tk):
             self.save_settings()
 
         try:
-            cookiefile = self.cookiefile_or_none()
-        except FileNotFoundError as exc:
-            messagebox.showerror("Missing Cookies File", str(exc))
+            cookiefile, cookies_from_browser = self.cookie_settings()
+        except (FileNotFoundError, ValueError) as exc:
+            messagebox.showerror("Cookies Setup", str(exc))
             return
 
         self.output_path = None
@@ -1738,7 +1795,7 @@ class PortionDownloaderApp(tk.Tk):
 
         worker = threading.Thread(
             target=self._download_worker,
-            args=(clip_jobs, video_option, audio_option, source_url, cookiefile),
+            args=(clip_jobs, video_option, audio_option, source_url, cookiefile, cookies_from_browser),
             daemon=True,
         )
         worker.start()
@@ -1750,6 +1807,7 @@ class PortionDownloaderApp(tk.Tk):
         audio_option: dict,
         source_url: str,
         cookiefile: str | None,
+        cookies_from_browser: str | None,
     ) -> None:
         ffmpeg_path = shutil.which("ffmpeg")
         if not ffmpeg_path:
@@ -1761,7 +1819,7 @@ class PortionDownloaderApp(tk.Tk):
                 raise RuntimeError("yt-dlp is not installed. Run: python -m pip install -r requirements.txt")
 
             self.ui_queue.put(("status", "Refreshing stream URLs..."))
-            with yt_dlp.YoutubeDL(ydl_options(cookiefile)) as ydl:
+            with yt_dlp.YoutubeDL(ydl_options(cookiefile, cookies_from_browser)) as ydl:
                 info = ydl.extract_info(source_url, download=False)
 
             video_formats = collect_video_formats(info.get("formats") or [])
@@ -1782,6 +1840,7 @@ class PortionDownloaderApp(tk.Tk):
                     clip_jobs=clip_jobs,
                     ffmpeg_path=ffmpeg_path,
                     cookiefile=cookiefile,
+                    cookies_from_browser=cookies_from_browser,
                 )
             else:
                 self.ui_queue.put(("status", "Starting direct stream clip..."))
@@ -1798,11 +1857,12 @@ class PortionDownloaderApp(tk.Tk):
                         clip_jobs=clip_jobs,
                         ffmpeg_path=ffmpeg_path,
                         cookiefile=cookiefile,
+                        cookies_from_browser=cookies_from_browser,
                     )
 
             self.ui_queue.put(("done", clip_jobs))
         except Exception as exc:
-            self.ui_queue.put(("error", f"Download failed: {add_cookie_hint(str(exc), cookiefile)}"))
+            self.ui_queue.put(("error", f"Download failed: {add_cookie_hint(str(exc), cookiefile, cookies_from_browser)}"))
 
     def should_retry_with_local_source(self, exc: RuntimeError, source_url: str) -> bool:
         message = str(exc).lower()
@@ -1889,6 +1949,7 @@ class PortionDownloaderApp(tk.Tk):
         clip_jobs: list[dict],
         ffmpeg_path: str,
         cookiefile: str | None,
+        cookies_from_browser: str | None,
     ) -> None:
         with tempfile.TemporaryDirectory(prefix="portion_downloader_") as temp_dir:
             temp_path = Path(temp_dir)
@@ -1899,6 +1960,7 @@ class PortionDownloaderApp(tk.Tk):
                 audio_format=audio_format,
                 progress_hook=self.ytdlp_progress_hook,
                 cookiefile=cookiefile,
+                cookies_from_browser=cookies_from_browser,
             )
             with yt_dlp.YoutubeDL(download_opts) as ydl:
                 downloaded_info = ydl.extract_info(source_url, download=True)
