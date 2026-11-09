@@ -1,6 +1,13 @@
 # Portion YouTube Video Downloader
 
 Simple Windows desktop app for downloading only a selected portion of a YouTube video with `yt-dlp` and `ffmpeg`.
+<table>
+  <tr>
+    <td width="33%"><img src="1%20portion-downloader.png" alt="App Main View"/></td>
+    <td width="33%"><img src="2%20portion-downloader.png" alt="Format Selection"/></td>
+    <td width="33%"><img src="3%20portion-downloader.png" alt="Downloading Progress"/></td>
+  </tr>
+</table>
 
 ## What it does
 
